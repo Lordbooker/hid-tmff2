@@ -105,9 +105,9 @@ static u8 t300rs_rdesc_nrm_fixed[] = {
 	0x26, 0xff, 0x03, /* Logical maximum (1023) */
 	0x46, 0xff, 0x03, /* Physical maximum (1023) */
 	0x81, 0x02, /* Input (Variable, Absolute) */
-	0x09, 0x32, /* Usage (Z) (Gas) */
+	0x09, 0x32, /* Usage (Z) (Clutch) */
 	0x81, 0x02, /* Input (Variable, Absolute) */
-	0x09, 0x31, /* Usage (Y) (Clutch) */
+	0x09, 0x31, /* Usage (Y) (Gas) */
 	0x81, 0x02, /* Input (Variable, Absolute) */
 	0x81, 0x03, /* Input (Variable, Absolute, Constant) */
 	0x05, 0x09, /* Usage page (Button) */
