@@ -141,18 +141,14 @@ static int t248_set_range(void *data, uint16_t value)
 
 static int t248_send_open(struct t300rs_device_entry *t248)
 {
-	int r1, r2;
-	t248->send_buffer[0] = 0x01;
-	t248->send_buffer[1] = 0x04;
-	if ((r1 = t300rs_send_int(t248)))
-		return r1;
+	static const u8 open_0[] = { 0x01, 0x04 };
+	static const u8 open_1[] = { 0x01, 0x05 };
+	int ret;
 
-	t248->send_buffer[0] = 0x01;
-	t248->send_buffer[1] = 0x05;
-	if ((r2 = t300rs_send_int(t248)))
-		return r2;
+	if ((ret = t300rs_send_buf(t248, open_0, sizeof(open_0))))
+		return ret;
 
-	return 0;
+	return t300rs_send_buf(t248, open_1, sizeof(open_1));
 }
 
 static int t248_open(void *data, int open_mode)
@@ -170,18 +166,14 @@ static int t248_open(void *data, int open_mode)
 
 static int t248_send_close(struct t300rs_device_entry *t248)
 {
-	int r1, r2;
-	t248->send_buffer[0] = 0x01;
-	t248->send_buffer[1] = 0x05;
-	if ((r1 = t300rs_send_int(t248)))
-		return r1;
+	static const u8 close_0[] = { 0x01, 0x05 };
+	static const u8 close_1[] = { 0x01, 0x00 };
+	int ret;
 
-	t248->send_buffer[0] = 0x01;
-	t248->send_buffer[1] = 0x00;
-	if ((r2 = t300rs_send_int(t248)))
-		return r2;
+	if ((ret = t300rs_send_buf(t248, close_0, sizeof(close_0))))
+		return ret;
 
-	return 0;
+	return t300rs_send_buf(t248, close_1, sizeof(close_1));
 }
 
 static int t248_close(void *data, int open_mode)

@@ -130,18 +130,14 @@ static int tspc_set_range(void *data, uint16_t value)
 
 static int tspc_send_open(struct t300rs_device_entry *tspc)
 {
-	int r1, r2;
-	tspc->send_buffer[0] = 0x01;
-	tspc->send_buffer[1] = 0x04;
-	if ((r1 = t300rs_send_int(tspc)))
-		return r1;
+	static const u8 open_0[] = { 0x01, 0x04 };
+	static const u8 open_1[] = { 0x01, 0x05 };
+	int ret;
 
-	tspc->send_buffer[0] = 0x01;
-	tspc->send_buffer[1] = 0x05;
-	if ((r2 = t300rs_send_int(tspc)))
-		return r2;
+	if ((ret = t300rs_send_buf(tspc, open_0, sizeof(open_0))))
+		return ret;
 
-	return 0;
+	return t300rs_send_buf(tspc, open_1, sizeof(open_1));
 }
 
 static int tspc_open(void *data, int open_mode)
@@ -159,18 +155,14 @@ static int tspc_open(void *data, int open_mode)
 
 static int tspc_send_close(struct t300rs_device_entry *tspc)
 {
-	int r1, r2;
-	tspc->send_buffer[0] = 0x01;
-	tspc->send_buffer[1] = 0x05;
-	if ((r1 = t300rs_send_int(tspc)))
-		return r1;
+	static const u8 close_0[] = { 0x01, 0x05 };
+	static const u8 close_1[] = { 0x01, 0x00 };
+	int ret;
 
-	tspc->send_buffer[0] = 0x01;
-	tspc->send_buffer[1] = 0x00;
-	if ((r2 = t300rs_send_int(tspc)))
-		return r2;
+	if ((ret = t300rs_send_buf(tspc, close_0, sizeof(close_0))))
+		return ret;
 
-	return 0;
+	return t300rs_send_buf(tspc, close_1, sizeof(close_1));
 }
 
 static int tspc_close(void *data, int open_mode)

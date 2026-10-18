@@ -468,12 +468,20 @@ static void t300rs_calculate_ramp_parameters(uint16_t *out_slope,
 	*out_invert = (start_level < end_level) ? 0x04 : 0x05;
 }
 
-int t300rs_send_buf(struct t300rs_device_entry *t300rs, u8 *send_buffer, size_t len)
+int t300rs_send_buf(struct t300rs_device_entry *t300rs, const u8 *send_buffer, size_t len)
 {
-	int i;
+	unsigned long flags;
+	size_t i;
+
 	/* check that send_buffer fits into our report */
 	if (len > t300rs->buffer_length)
 		return -EINVAL;
+
+	/* the field values are shared by everyone sending to the wheel, and
+	 * some callers (gain, autocenter) run in atomic context. usbhid copies
+	 * the report into its own output queue in hid_hw_request(), so holding
+	 * the lock until then is enough to keep packets from mixing. */
+	spin_lock_irqsave(&t300rs->send_lock, flags);
 
 	/* fill with actual data */
 	for (i = 0; i < len; ++i)
@@ -484,15 +492,19 @@ int t300rs_send_buf(struct t300rs_device_entry *t300rs, u8 *send_buffer, size_t 
 		t300rs->ff_field->value[i] = 0;
 
 	hid_hw_request(t300rs->hdev, t300rs->report, HID_REQ_SET_REPORT);
+
+	spin_unlock_irqrestore(&t300rs->send_lock, flags);
 	return 0;
 }
 
 int t300rs_send_int(struct t300rs_device_entry *t300rs)
 {
-	t300rs_send_buf(t300rs, t300rs->send_buffer, t300rs->buffer_length);
+	int ret;
+
+	ret = t300rs_send_buf(t300rs, t300rs->send_buffer, t300rs->buffer_length);
 	memset(t300rs->send_buffer, 0, t300rs->buffer_length);
 
-	return 0;
+	return ret;
 }
 
 static void t300rs_fill_header(struct t300rs_packet_header *packet_header,
@@ -1182,33 +1194,31 @@ int t300rs_set_autocenter(void *data, uint16_t value)
 	struct __packed t300rs_packet_autocenter {
 		struct t300rs_setup_header header;
 		uint16_t value;
-	} *autocenter_packet;
+	} autocenter_packet = { 0 };
 	int ret;
 
 	if (!t300rs)
 		return -ENODEV;
 
-	/* TODO: this should probably also use a separately allocated buffer?
-	 * someone might change autocentering while we're updating the buffer
-	 * which would cause corruption */
-	autocenter_packet = (struct t300rs_packet_autocenter *)t300rs->send_buffer;
+	/* called from atomic context by the ff core, so this uses its own
+	 * buffer on the stack instead of t300rs->send_buffer */
+	autocenter_packet.header.cmd = 0x08;
+	autocenter_packet.header.code = 0x04;
+	autocenter_packet.value = cpu_to_le16(0x01);
 
-	autocenter_packet->header.cmd = 0x08;
-	autocenter_packet->header.code = 0x04;
-	autocenter_packet->value = cpu_to_le16(0x01);
-
-	if ((ret = t300rs_send_int(t300rs))) {
-		hid_err(t300rs->hdev, "failed setting autocenter");
+	if ((ret = t300rs_send_buf(t300rs, (u8 *)&autocenter_packet,
+					sizeof(autocenter_packet)))) {
+		hid_err(t300rs->hdev, "failed setting autocenter\n");
 		return ret;
 	}
 
-	autocenter_packet->header.cmd = 0x08;
-	autocenter_packet->header.code = 0x03;
+	autocenter_packet.header.cmd = 0x08;
+	autocenter_packet.header.code = 0x03;
+	autocenter_packet.value = cpu_to_le16(value);
 
-	autocenter_packet->value = cpu_to_le16(value);
-
-	if ((ret = t300rs_send_int(t300rs)))
-		hid_err(t300rs->hdev, "failed setting autocenter");
+	if ((ret = t300rs_send_buf(t300rs, (u8 *)&autocenter_packet,
+					sizeof(autocenter_packet))))
+		hid_err(t300rs->hdev, "failed setting autocenter\n");
 
 	return ret;
 }
@@ -1216,19 +1226,16 @@ int t300rs_set_autocenter(void *data, uint16_t value)
 int t300rs_set_gain(void *data, uint16_t gain)
 {
 	struct t300rs_device_entry *t300rs = data;
-	struct __packed t300rs_packet_gain {
-		struct t300rs_setup_header header;
-	} *gain_packet;
+	struct t300rs_setup_header gain_packet;
 	int ret;
 
 	if (!t300rs)
 		return -ENODEV;
 
-	gain_packet = (struct t300rs_packet_gain *)t300rs->send_buffer;
-	gain_packet->header.cmd = 0x02;
-	gain_packet->header.code = (gain >> 8) & 0xff;
+	gain_packet.cmd = 0x02;
+	gain_packet.code = (gain >> 8) & 0xff;
 
-	if ((ret = t300rs_send_int(t300rs)))
+	if ((ret = t300rs_send_buf(t300rs, (u8 *)&gain_packet, sizeof(gain_packet))))
 		hid_err(t300rs->hdev, "failed setting gain: %i\n", ret);
 
 	return ret;
@@ -1237,10 +1244,7 @@ int t300rs_set_gain(void *data, uint16_t gain)
 int t300rs_set_range(void *data, uint16_t value)
 {
 	struct t300rs_device_entry *t300rs = data;
-	/* it's important that we don't use t300rs->send_buffer, as range can be
-	 * set from outside of the FFB environment, and we don't want to
-	 * accidentally overwrite any data. */
-	u8 *send_buffer = kzalloc(t300rs->buffer_length, GFP_KERNEL);
+	u8 send_buffer[4];
 	uint16_t scaled_value;
 	int ret;
 
@@ -1254,51 +1258,40 @@ int t300rs_set_range(void *data, uint16_t value)
 		value = 1080;
 	}
 
-	if (!send_buffer) {
-		ret = -EINVAL;
-		hid_err(t300rs->hdev, "could not allocate send_buffer\n");
-		goto err;
-	}
-
 	scaled_value = value * 0x3c;
 	send_buffer[0] = 0x08;
 	send_buffer[1] = 0x11;
 	send_buffer[2] = scaled_value & 0xff;
 	send_buffer[3] = scaled_value >> 8;
 
-	if ((ret = t300rs_send_buf(t300rs, send_buffer, t300rs->buffer_length)))
+	if ((ret = t300rs_send_buf(t300rs, send_buffer, sizeof(send_buffer)))) {
 		hid_warn(t300rs->hdev, "failed setting range\n");
+		return ret;
+	}
 
-	/* since everythin went OK, update the current range */
+	/* only remember the range if it actually was sent */
 	range = value;
-err:
-	kfree(send_buffer);
-	return ret;
+	return 0;
 }
 
 static int t300rs_send_open(struct t300rs_device_entry *t300rs)
 {
-	struct __packed t300rs_packet_open {
-		struct t300rs_setup_header header;
-	} *open_packet;
+	const struct t300rs_setup_header open_packet = {
+		.cmd = 0x01,
+		.code = 0x05,
+	};
 
-	open_packet = (struct t300rs_packet_open *)t300rs->send_buffer;
-	open_packet->header.cmd = 0x01;
-	open_packet->header.code = 0x05;
-
-	return t300rs_send_int(t300rs);
+	return t300rs_send_buf(t300rs, (const u8 *)&open_packet, sizeof(open_packet));
 }
 
 static int t300rs_send_close(struct t300rs_device_entry *t300rs)
 {
-	struct __packed t300rs_packet_open {
-		struct t300rs_setup_header header;
-	} *open_packet;
+	const struct t300rs_setup_header close_packet = {
+		.cmd = 0x01,
+		.code = 0x00,
+	};
 
-	open_packet = (struct t300rs_packet_open *)t300rs->send_buffer;
-	open_packet->header.cmd = 0x01;
-
-	return t300rs_send_int(t300rs);
+	return t300rs_send_buf(t300rs, (const u8 *)&close_packet, sizeof(close_packet));
 }
 
 int t300rs_open(void *data, int open_mode)
@@ -1474,6 +1467,7 @@ int t300rs_init_common(struct tmff2_device_entry *tmff2,
 	/* tmff2_probe() only accepts USB devices, so this cast is safe */
 	t300rs->usbdev = interface_to_usbdev(to_usb_interface(hdev->dev.parent));
 	t300rs->buffer_length = buffer_length;
+	spin_lock_init(&t300rs->send_lock);
 
 	/* the report descriptor is replaced by wheel_fixup, but make sure the
 	 * output report actually looks like we expect before writing into it */

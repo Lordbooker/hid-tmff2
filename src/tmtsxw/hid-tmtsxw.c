@@ -129,18 +129,14 @@ static int tsxw_set_range(void *data, uint16_t value)
 
 static int tsxw_send_open(struct t300rs_device_entry *tsxw)
 {
-	int r1, r2;
-	tsxw->send_buffer[0] = 0x01;
-	tsxw->send_buffer[1] = 0x04;
-	if ((r1 = t300rs_send_int(tsxw)))
-		return r1;
+	static const u8 open_0[] = { 0x01, 0x04 };
+	static const u8 open_1[] = { 0x01, 0x05 };
+	int ret;
 
-	tsxw->send_buffer[0] = 0x01;
-	tsxw->send_buffer[1] = 0x05;
-	if ((r2 = t300rs_send_int(tsxw)))
-		return r2;
+	if ((ret = t300rs_send_buf(tsxw, open_0, sizeof(open_0))))
+		return ret;
 
-	return 0;
+	return t300rs_send_buf(tsxw, open_1, sizeof(open_1));
 }
 
 static int tsxw_open(void *data, int open_mode)
@@ -158,18 +154,14 @@ static int tsxw_open(void *data, int open_mode)
 
 static int tsxw_send_close(struct t300rs_device_entry *tsxw)
 {
-	int r1, r2;
-	tsxw->send_buffer[0] = 0x01;
-	tsxw->send_buffer[1] = 0x05;
-	if ((r1 = t300rs_send_int(tsxw)))
-		return r1;
+	static const u8 close_0[] = { 0x01, 0x05 };
+	static const u8 close_1[] = { 0x01, 0x00 };
+	int ret;
 
-	tsxw->send_buffer[0] = 0x01;
-	tsxw->send_buffer[1] = 0x00;
-	if ((r2 = t300rs_send_int(tsxw)))
-		return r2;
+	if ((ret = t300rs_send_buf(tsxw, close_0, sizeof(close_0))))
+		return ret;
 
-	return 0;
+	return t300rs_send_buf(tsxw, close_1, sizeof(close_1));
 }
 
 static int tsxw_close(void *data, int open_mode)

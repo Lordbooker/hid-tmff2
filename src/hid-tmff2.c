@@ -62,35 +62,24 @@ static u16 tmff2_scale_gain(u16 value)
 	return DIV_ROUND_CLOSEST((u32)value * gain, GAIN_MAX);
 }
 
-static spinlock_t lock;
-
 static struct tmff2_device_entry *tmff2_from_hdev(struct hid_device *hdev)
 {
-	unsigned long lock_flags = 0;
-	struct tmff2_device_entry *tmff2;
-	spin_lock_irqsave(&lock, lock_flags);
+	struct tmff2_device_entry *tmff2 = hid_get_drvdata(hdev);
 
-	if (!(tmff2 = hid_get_drvdata(hdev)))
+	if (!tmff2)
 		dev_err(&hdev->dev, "hdev private data not found\n");
-
-	spin_unlock_irqrestore(&lock, lock_flags);
 
 	return tmff2;
 }
 
 static struct tmff2_device_entry *tmff2_from_input(struct input_dev *input_dev)
 {
-	unsigned long lock_flags = 0;
-	struct hid_device *hdev;
-	spin_lock_irqsave(&lock, lock_flags);
+	struct hid_device *hdev = input_get_drvdata(input_dev);
 
-	if (!(hdev = input_get_drvdata(input_dev)))
+	if (!hdev) {
 		dev_err(&input_dev->dev, "input_dev private data not found\n");
-
-	spin_unlock_irqrestore(&lock, lock_flags);
-
-	if (!hdev)
 		return NULL;
+	}
 
 	return tmff2_from_hdev(hdev);
 }
@@ -407,7 +396,7 @@ static void tmff2_work_handler(struct work_struct *w)
 		hid_hw_wait(tmff2->hdev);
 	}
 
-	if (max_count && tmff2->allow_scheduling)
+	if (max_count && READ_ONCE(tmff2->allow_scheduling))
 		schedule_delayed_work(&tmff2->work, msecs_to_jiffies(timer_msecs));
 }
 
@@ -498,7 +487,7 @@ static int tmff2_play(struct input_dev *dev, int effect_id, int value)
 
 	spin_unlock_irqrestore(&tmff2->lock, lock_flags);
 
-	if (!delayed_work_pending(&tmff2->work) && tmff2->allow_scheduling)
+	if (!delayed_work_pending(&tmff2->work) && READ_ONCE(tmff2->allow_scheduling))
 		schedule_delayed_work(&tmff2->work, 0);
 
 	return 0;
@@ -608,7 +597,6 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 	int ret, i;
 	struct ff_device *ff;
 
-	spin_lock_init(&lock);
 	spin_lock_init(&tmff2->lock);
 	INIT_DELAYED_WORK(&tmff2->work, tmff2_work_handler);
 
@@ -677,7 +665,7 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 	if ((ret = tmff2_create_files(tmff2)))
 		goto file_err;
 
-	tmff2->allow_scheduling = 1;
+	WRITE_ONCE(tmff2->allow_scheduling, 1);
 	return 0;
 
 file_err:
@@ -804,7 +792,11 @@ static void tmff2_remove(struct hid_device *hdev)
 	if (!tmff2)
 		return;
 
-	tmff2->allow_scheduling = 0;
+	/* stop the work handler from rescheduling itself. tmff2_play() may
+	 * still have seen allow_scheduling set and queue the work once more,
+	 * which is why the work is cancelled again after hid_hw_stop(), when
+	 * the input device (and with it any ff playback) is gone. */
+	WRITE_ONCE(tmff2->allow_scheduling, 0);
 	cancel_delayed_work_sync(&tmff2->work);
 
 	dev = &tmff2->hdev->dev;
@@ -827,8 +819,11 @@ static void tmff2_remove(struct hid_device *hdev)
 		device_remove_file(dev, &dev_attr_gain);
 
 	hid_hw_stop(hdev);
+	cancel_delayed_work_sync(&tmff2->work);
+
 	tmff2->wheel_destroy(tmff2->data);
 
+	hid_set_drvdata(hdev, NULL);
 	kfree(tmff2->states);
 	kfree(tmff2);
 }
