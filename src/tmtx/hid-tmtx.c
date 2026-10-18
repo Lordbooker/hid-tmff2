@@ -6,24 +6,6 @@
 #define TMTX_MAX_EFFECTS 16
 #define TMTX_BUFFER_LENGTH 63
 
-static const u8 setup_0[64] = { 0x42, 0x01 };
-static const u8 setup_1[64] = { 0x0a, 0x04, 0x90, 0x03 };
-static const u8 setup_2[64] = { 0x0a, 0x04, 0x00, 0x0c };
-static const u8 setup_3[64] = { 0x0a, 0x04, 0x12, 0x10 };
-static const u8 setup_4[64] = { 0x0a, 0x04, 0x00, 0x06 };
-static const u8 setup_5[64] = { 0x0a, 0x04, 0x00, 0x0e };
-static const u8 setup_6[64] = { 0x0a, 0x04, 0x00, 0x0e, 0x01 };
-static const u8 *const setup_arr[] = { setup_0, setup_1, setup_2, setup_3, setup_4, setup_5, setup_6 };
-static const unsigned int setup_arr_sizes[] = {
-	ARRAY_SIZE(setup_0),
-	ARRAY_SIZE(setup_1),
-	ARRAY_SIZE(setup_2),
-	ARRAY_SIZE(setup_3),
-	ARRAY_SIZE(setup_4),
-	ARRAY_SIZE(setup_5),
-	ARRAY_SIZE(setup_6)
-};
-
 static const unsigned long tx_params =
 	PARAM_SPRING_LEVEL
 	| PARAM_DAMPER_LEVEL
@@ -115,41 +97,6 @@ static u8 tx_pc_rdesc_fixed[] = {
 	0xc0, /* End collection */
 	0xc0, /* End collection */
 };
-
-static int tx_interrupts(struct t300rs_device_entry *tx)
-{
-	u8 *send_buf = kmalloc(256, GFP_KERNEL);
-	struct usb_interface *usbif = to_usb_interface(tx->hdev->dev.parent);
-	struct usb_host_endpoint *ep;
-	int ret, trans, b_ep, i;
-
-	if (!send_buf) {
-		hid_err(tx->hdev, "failed allocating send buffer\n");
-		return -ENOMEM;
-	}
-
-	ep = &usbif->cur_altsetting->endpoint[1];
-	b_ep = ep->desc.bEndpointAddress;
-
-	for (i = 0; i < ARRAY_SIZE(setup_arr); ++i) {
-		memcpy(send_buf, setup_arr[i], setup_arr_sizes[i]);
-
-		ret = usb_interrupt_msg(tx->usbdev,
-				usb_sndintpipe(tx->usbdev, b_ep),
-				send_buf, setup_arr_sizes[i],
-				&trans,
-				USB_CTRL_SET_TIMEOUT);
-
-		if (ret) {
-			hid_err(tx->hdev, "setup data couldn't be sent\n");
-			goto err;
-		}
-	}
-
-err:
-	kfree(send_buf);
-	return ret;
-}
 
 static int tx_wheel_destroy(void *data)
 {
@@ -243,35 +190,18 @@ static int tx_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 {
 	struct t300rs_device_entry *tx = kzalloc(sizeof(struct t300rs_device_entry),
 						 GFP_KERNEL);
-	struct list_head *report_list;
 	int ret;
-
 
 	if (!tx) {
 		ret = -ENOMEM;
 		goto tx_err;
 	}
 
-	tx->hdev = tmff2->hdev;
-	tx->input_dev = tmff2->input_dev;
-	tx->usbdev = to_usb_device(tmff2->hdev->dev.parent->parent);
-	tx->buffer_length = TMTX_BUFFER_LENGTH;
+	if ((ret = t300rs_init_common(tmff2, tx, TMTX_BUFFER_LENGTH)))
+		goto init_err;
 
-	tx->send_buffer = kzalloc(tx->buffer_length, GFP_KERNEL);
-	if (!tx->send_buffer) {
-		ret = -ENOMEM;
-		goto send_err;
-	}
-
-	report_list = &tx->hdev->report_enum[HID_OUTPUT_REPORT].report_list;
-	tx->report = list_entry(report_list->next, struct hid_report, list);
-	tx->ff_field = tx->report->field[0];
-
-	tx->open = tx->input_dev->open;
-	tx->close = tx->input_dev->close;
-
-	if ((ret = tx_interrupts(tx)))
-		goto interrupt_err;
+	if ((ret = t300rs_send_setup_interrupts(tx)))
+		goto init_err;
 
 	/* everything went OK */
 	tmff2->data = tx;
@@ -285,8 +215,8 @@ static int tx_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 	hid_info(tx->hdev, "force feedback for TX\n");
 	return 0;
 
-interrupt_err:
-send_err:
+init_err:
+	kfree(tx->send_buffer);
 	kfree(tx);
 tx_err:
 	hid_err(tmff2->hdev, "failed initializing TX\n");

@@ -152,4 +152,11 @@ int t300rs_set_autocenter(void *, uint16_t);
 int t300rs_send_buf(struct t300rs_device_entry *t300rs, u8 *send_buffer, size_t len);
 int t300rs_send_int(struct t300rs_device_entry *t300rs);
 
+/* shared initialization of a t300rs_device_entry, validates the output report
+ * layout before anything is written into it */
+int t300rs_init_common(struct tmff2_device_entry *tmff2,
+		struct t300rs_device_entry *t300rs, u8 buffer_length);
+/* send the setup sequence used by T248, TX, TS-XW and TS-PC */
+int t300rs_send_setup_interrupts(struct t300rs_device_entry *t300rs);
+
 #endif

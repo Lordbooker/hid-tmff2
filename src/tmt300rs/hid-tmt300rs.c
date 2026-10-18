@@ -37,10 +37,12 @@ static const signed short t300rs_effects[] = {
 	-1
 };
 
+/* the wheel answers the firmware request with up to wLength (8) bytes, so the
+ * response buffer has to be at least that large */
 struct __packed t300rs_fw_response {
 	uint8_t unused1[2];
 	uint8_t fw_version;
-	uint8_t unused2;
+	uint8_t unused2[5];
 };
 
 
@@ -71,12 +73,12 @@ struct __packed t300rs_packet_timing {
 	uint16_t end_marker;
 };
 
-struct usb_ctrlrequest t300rs_fw_request = {
+static const struct usb_ctrlrequest t300rs_fw_request = {
 	.bRequestType = 0xc1,
 	.bRequest = 86,
 	.wValue = 0,
 	.wIndex = 0,
-	.wLength = 8
+	.wLength = sizeof(struct t300rs_fw_response)
 };
 
 struct t300rs_data {
@@ -1354,8 +1356,14 @@ static int t300rs_check_firmware(struct t300rs_device_entry *t300rs)
 		goto out;
 	}
 
+	if (ret <= offsetof(struct t300rs_fw_response, fw_version)) {
+		hid_warn(t300rs->hdev, "short firmware version response (%i bytes)\n", ret);
+		ret = 0;
+		goto out;
+	}
+
 	/* educated guess */
-	if (fw_response->fw_version < 31 && ret >= 0) {
+	if (fw_response->fw_version < 31) {
 		hid_warn(t300rs->hdev,
 				"firmware version %i might be too old, consider updating\n",
 				fw_response->fw_version
@@ -1398,7 +1406,7 @@ static int t300rs_get_attachment(struct t300rs_device_entry *t300rs)
 				uint8_t model;
 			} b;
 		};
-	} *response = kzalloc(GFP_KERNEL, sizeof(struct t300rs_attachment_response));
+	} *response = kzalloc(sizeof(struct t300rs_attachment_response), GFP_KERNEL);
 	struct usb_ctrlrequest t300rs_attachment_rq = {
 		.bRequestType = 0xc1,
 		.bRequest = 73,
@@ -1408,7 +1416,7 @@ static int t300rs_get_attachment(struct t300rs_device_entry *t300rs)
 	};
 	int ret, attachment;
 	if (!response)
-		return -ENODEV;
+		return -ENOMEM;
 
 	ret = usb_control_msg(t300rs->usbdev,
 			usb_rcvctrlpipe(t300rs->usbdev, 0),
@@ -1426,14 +1434,21 @@ static int t300rs_get_attachment(struct t300rs_device_entry *t300rs)
 		goto out;
 	}
 
+	/* the attachment byte is at the same offset in both response types */
+	if (ret <= offsetof(struct t300rs_attachment_response, b.attachment)) {
+		hid_err(t300rs->hdev, "short attachment response (%i bytes)\n", ret);
+		ret = -EIO;
+		goto out;
+	}
+
 	if (response->type == cpu_to_le16(0x49)) {
 		attachment = response->a.attachment;
 	} else if (response->type == cpu_to_le16(0x47)) {
 		attachment = response->b.attachment;
 	} else {
 		hid_err(t300rs->hdev,
-				"unknown packet type %hx\n, please contact a maintainer",
-				response->type);
+				"unknown packet type %hx, please contact a maintainer\n",
+				le16_to_cpu(response->type));
 		ret = -EINVAL;
 		goto out;
 	}
@@ -1446,10 +1461,111 @@ out:
 	return ret;
 }
 
+int t300rs_init_common(struct tmff2_device_entry *tmff2,
+		struct t300rs_device_entry *t300rs, u8 buffer_length)
+{
+	struct hid_device *hdev = tmff2->hdev;
+	struct list_head *report_list =
+		&hdev->report_enum[HID_OUTPUT_REPORT].report_list;
+	struct hid_report *report;
+
+	t300rs->hdev = hdev;
+	t300rs->input_dev = tmff2->input_dev;
+	/* tmff2_probe() only accepts USB devices, so this cast is safe */
+	t300rs->usbdev = interface_to_usbdev(to_usb_interface(hdev->dev.parent));
+	t300rs->buffer_length = buffer_length;
+
+	/* the report descriptor is replaced by wheel_fixup, but make sure the
+	 * output report actually looks like we expect before writing into it */
+	if (list_empty(report_list)) {
+		hid_err(hdev, "no output report found\n");
+		return -ENODEV;
+	}
+
+	report = list_first_entry(report_list, struct hid_report, list);
+	if (report->maxfield < 1 || !report->field[0]
+			|| report->field[0]->report_count < buffer_length) {
+		hid_err(hdev, "unexpected output report layout\n");
+		return -ENODEV;
+	}
+
+	t300rs->report = report;
+	t300rs->ff_field = report->field[0];
+
+	t300rs->send_buffer = kzalloc(buffer_length, GFP_KERNEL);
+	if (!t300rs->send_buffer)
+		return -ENOMEM;
+
+	t300rs->open = t300rs->input_dev->open;
+	t300rs->close = t300rs->input_dev->close;
+
+	return 0;
+}
+
+/* every setup packet is sent as a full 64 byte packet, the remaining bytes
+ * are zero */
+#define T300RS_SETUP_PACKET_LENGTH 64
+
+static const u8 setup_arr[][T300RS_SETUP_PACKET_LENGTH] = {
+	{ 0x42, 0x01 },
+	{ 0x0a, 0x04, 0x90, 0x03 },
+	{ 0x0a, 0x04, 0x00, 0x0c },
+	{ 0x0a, 0x04, 0x12, 0x10 },
+	{ 0x0a, 0x04, 0x00, 0x06 },
+	{ 0x0a, 0x04, 0x00, 0x0e },
+	{ 0x0a, 0x04, 0x00, 0x0e, 0x01 },
+};
+
+int t300rs_send_setup_interrupts(struct t300rs_device_entry *t300rs)
+{
+	struct usb_interface *usbif = to_usb_interface(t300rs->hdev->dev.parent);
+	struct usb_host_interface *alt = usbif->cur_altsetting;
+	struct usb_endpoint_descriptor *ep;
+	u8 *send_buf;
+	int ret = 0, trans, i;
+
+	/* the setup data goes to the second endpoint of the interface, don't
+	 * trust the device to actually have one */
+	if (alt->desc.bNumEndpoints < 2) {
+		hid_err(t300rs->hdev, "unexpected number of endpoints: %u\n",
+				alt->desc.bNumEndpoints);
+		return -ENODEV;
+	}
+
+	ep = &alt->endpoint[1].desc;
+	if (!usb_endpoint_dir_out(ep)) {
+		hid_err(t300rs->hdev, "setup endpoint is not an OUT endpoint\n");
+		return -ENODEV;
+	}
+
+	/* usb transfers need a heap buffer */
+	send_buf = kmalloc(T300RS_SETUP_PACKET_LENGTH, GFP_KERNEL);
+	if (!send_buf)
+		return -ENOMEM;
+
+	for (i = 0; i < ARRAY_SIZE(setup_arr); ++i) {
+		memcpy(send_buf, setup_arr[i], T300RS_SETUP_PACKET_LENGTH);
+
+		ret = usb_interrupt_msg(t300rs->usbdev,
+				usb_sndintpipe(t300rs->usbdev, ep->bEndpointAddress),
+				send_buf, T300RS_SETUP_PACKET_LENGTH,
+				&trans,
+				USB_CTRL_SET_TIMEOUT);
+
+		if (ret) {
+			hid_err(t300rs->hdev, "setup data couldn't be sent: %i\n", ret);
+			break;
+		}
+	}
+
+	kfree(send_buf);
+	return ret;
+}
+
 static int t300rs_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 {
 	struct t300rs_device_entry *t300rs = kzalloc(sizeof(struct t300rs_device_entry), GFP_KERNEL);
-	struct list_head *report_list;
+	u8 buffer_length;
 	int ret;
 
 	if (!t300rs) {
@@ -1457,32 +1573,16 @@ static int t300rs_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 		goto t300rs_err;
 	}
 
-	t300rs->hdev = tmff2->hdev;
-	t300rs->input_dev = tmff2->input_dev;
-	t300rs->usbdev = to_usb_device(tmff2->hdev->dev.parent->parent);
-
-	if(t300rs->hdev->product == TMT300RS_PS4_NORM_ID)
-		t300rs->buffer_length = T300RS_PS4_BUFFER_LENGTH;
+	if (tmff2->hdev->product == TMT300RS_PS4_NORM_ID)
+		buffer_length = T300RS_PS4_BUFFER_LENGTH;
 	else
-		t300rs->buffer_length = T300RS_NORM_BUFFER_LENGTH;
+		buffer_length = T300RS_NORM_BUFFER_LENGTH;
 
-	t300rs->send_buffer = kzalloc(t300rs->buffer_length, GFP_KERNEL);
-	if (!t300rs->send_buffer) {
-		ret = -ENOMEM;
-		goto send_err;
-	}
+	if ((ret = t300rs_init_common(tmff2, t300rs, buffer_length)))
+		goto init_err;
 
 	if ((ret = t300rs_check_firmware(t300rs)))
-		goto firmware_err;
-
-	report_list = &t300rs->hdev->report_enum[HID_OUTPUT_REPORT].report_list;
-
-	/* because we set the rdesc, we know exactly which report and field to use */
-	t300rs->report = list_entry(report_list->next, struct hid_report, list);
-	t300rs->ff_field = t300rs->report->field[0];
-
-	t300rs->open = t300rs->input_dev->open;
-	t300rs->close = t300rs->input_dev->close;
+		goto init_err;
 
 	/* TODO: PS4 advanced mode? */
 	alt_mode = (t300rs->mode = (t300rs->hdev->product == TMT300RS_PS3_ADV_ID));
@@ -1501,9 +1601,8 @@ static int t300rs_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 	hid_info(t300rs->hdev, "force feedback for T300RS\n");
 	return 0;
 
-firmware_err:
+init_err:
 	kfree(t300rs->send_buffer);
-send_err:
 	kfree(t300rs);
 t300rs_err:
 	hid_err(tmff2->hdev, "failed initializing T300RS\n");

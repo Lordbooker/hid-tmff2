@@ -3,7 +3,16 @@
 #include <linux/module.h>
 #include <linux/hid.h>
 #include <linux/version.h>
+#include <linux/usb.h>
 #include "hid-tmff2.h"
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,16,0)
+/* hid_is_usb() was added in 5.16, older kernels only have the generic check */
+static inline bool hid_is_usb(struct hid_device *hdev)
+{
+	return hid_is_using_ll_driver(hdev, &usb_hid_driver);
+}
+#endif
 
 
 int open_mode = 1;
@@ -79,6 +88,9 @@ static struct tmff2_device_entry *tmff2_from_input(struct input_dev *input_dev)
 		dev_err(&input_dev->dev, "input_dev private data not found\n");
 
 	spin_unlock_irqrestore(&lock, lock_flags);
+
+	if (!hdev)
+		return NULL;
 
 	return tmff2_from_hdev(hdev);
 }
@@ -678,12 +690,16 @@ err:
 
 static int tmff2_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
-	struct tmff2_device_entry *tmff2 =
-		kzalloc(sizeof(struct tmff2_device_entry), GFP_KERNEL);
-
+	struct tmff2_device_entry *tmff2;
 	int ret;
 
+	/* the wheel backends talk to the usb device directly, which is only
+	 * valid if the device really is connected via usbhid (and not e.g.
+	 * emulated through uhid with a matching vendor/product id) */
+	if (!hid_is_usb(hdev))
+		return -ENODEV;
 
+	tmff2 = kzalloc(sizeof(struct tmff2_device_entry), GFP_KERNEL);
 	if (!tmff2) {
 		ret = -ENOMEM;
 		goto oom_err;
@@ -709,14 +725,17 @@ static int tmff2_probe(struct hid_device *hdev, const struct hid_device_id *id)
 			if ((ret = tx_populate_api(tmff2)))
 				goto wheel_err;
 			break;
+
 		case TSXW_ACTIVE:
 			if ((ret = tsxw_populate_api(tmff2)))
 				goto wheel_err;
 			break;
-			case TMTS_PC_RACER_ID:
+
+		case TMTS_PC_RACER_ID:
 			if ((ret = tspc_populate_api(tmff2)))
 				goto wheel_err;
 			break;
+
 		default:
 			ret = -ENODEV;
 			goto wheel_err;
@@ -732,7 +751,13 @@ static int tmff2_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		goto hid_err;
 	}
 
-	tmff2->input_dev = list_entry(hdev->inputs.next, struct hid_input, list)->input;
+	if (list_empty(&hdev->inputs)) {
+		hid_err(hdev, "no input device found\n");
+		ret = -ENODEV;
+		goto init_err;
+	}
+
+	tmff2->input_dev = list_first_entry(&hdev->inputs, struct hid_input, list)->input;
 
 	if ((ret = tmff2_wheel_init(tmff2))) {
 		hid_err(hdev, "init failed\n");
@@ -746,6 +771,7 @@ init_err:
 hid_err:
 	tmff2->wheel_destroy(tmff2->data);
 wheel_err:
+	hid_set_drvdata(hdev, NULL);
 	kfree(tmff2);
 oom_err:
 	return ret;

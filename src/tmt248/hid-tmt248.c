@@ -6,24 +6,6 @@
 #define T248_MAX_EFFECTS 16
 #define T248_BUFFER_LENGTH 63
 
-static const u8 setup_0[64] = { 0x42, 0x01 };
-static const u8 setup_1[64] = { 0x0a, 0x04, 0x90, 0x03 };
-static const u8 setup_2[64] = { 0x0a, 0x04, 0x00, 0x0c };
-static const u8 setup_3[64] = { 0x0a, 0x04, 0x12, 0x10 };
-static const u8 setup_4[64] = { 0x0a, 0x04, 0x00, 0x06 };
-static const u8 setup_5[64] = { 0x0a, 0x04, 0x00, 0x0e };
-static const u8 setup_6[64] = { 0x0a, 0x04, 0x00, 0x0e, 0x01 };
-static const u8 *const setup_arr[] = { setup_0, setup_1, setup_2, setup_3, setup_4, setup_5, setup_6 };
-static const unsigned int setup_arr_sizes[] = {
-	ARRAY_SIZE(setup_0),
-	ARRAY_SIZE(setup_1),
-	ARRAY_SIZE(setup_2),
-	ARRAY_SIZE(setup_3),
-	ARRAY_SIZE(setup_4),
-	ARRAY_SIZE(setup_5),
-	ARRAY_SIZE(setup_6)
-};
-
 static const unsigned long t248_params =
 	PARAM_SPRING_LEVEL
 	| PARAM_DAMPER_LEVEL
@@ -128,41 +110,6 @@ static u8 t248_pc_rdesc_fixed[] = {
 	0xc0, /* End collection */
 };
 
-static int t248_interrupts(struct t300rs_device_entry *t248)
-{
-	u8 *send_buf = kmalloc(256, GFP_KERNEL);
-	struct usb_interface *usbif = to_usb_interface(t248->hdev->dev.parent);
-	struct usb_host_endpoint *ep;
-	int ret, trans, b_ep, i;
-
-	if (!send_buf) {
-		hid_err(t248->hdev, "failed allocating send buffer\n");
-		return -ENOMEM;
-	}
-
-	ep = &usbif->cur_altsetting->endpoint[1];
-	b_ep = ep->desc.bEndpointAddress;
-
-	for (i = 0; i < ARRAY_SIZE(setup_arr); ++i) {
-		memcpy(send_buf, setup_arr[i], setup_arr_sizes[i]);
-
-		ret = usb_interrupt_msg(t248->usbdev,
-				usb_sndintpipe(t248->usbdev, b_ep),
-				send_buf, setup_arr_sizes[i],
-				&trans,
-				USB_CTRL_SET_TIMEOUT);
-
-		if (ret) {
-			hid_err(t248->hdev, "setup data couldn't be sent\n");
-			goto err;
-		}
-	}
-
-err:
-	kfree(send_buf);
-	return ret;
-}
-
 static int t248_wheel_destroy(void *data)
 {
 	struct t300rs_device_entry *t300rs = data;
@@ -255,35 +202,18 @@ static int t248_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 {
 	struct t300rs_device_entry *t248 = kzalloc(sizeof(struct t300rs_device_entry),
 						   GFP_KERNEL);
-	struct list_head *report_list;
 	int ret;
-
 
 	if (!t248) {
 		ret = -ENOMEM;
 		goto t248_err;
 	}
 
-	t248->hdev = tmff2->hdev;
-	t248->input_dev = tmff2->input_dev;
-	t248->usbdev = to_usb_device(tmff2->hdev->dev.parent->parent);
-	t248->buffer_length = T248_BUFFER_LENGTH;
+	if ((ret = t300rs_init_common(tmff2, t248, T248_BUFFER_LENGTH)))
+		goto init_err;
 
-	t248->send_buffer = kzalloc(t248->buffer_length, GFP_KERNEL);
-	if (!t248->send_buffer) {
-		ret = -ENOMEM;
-		goto send_err;
-	}
-
-	report_list = &t248->hdev->report_enum[HID_OUTPUT_REPORT].report_list;
-	t248->report = list_entry(report_list->next, struct hid_report, list);
-	t248->ff_field = t248->report->field[0];
-
-	t248->open = t248->input_dev->open;
-	t248->close = t248->input_dev->close;
-
-	if ((ret = t248_interrupts(t248)))
-		goto interrupt_err;
+	if ((ret = t300rs_send_setup_interrupts(t248)))
+		goto init_err;
 
 	/* everything went OK */
 	tmff2->data = t248;
@@ -297,8 +227,8 @@ static int t248_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 	hid_info(t248->hdev, "force feedback for T248\n");
 	return 0;
 
-interrupt_err:
-send_err:
+init_err:
+	kfree(t248->send_buffer);
 	kfree(t248);
 t248_err:
 	hid_err(tmff2->hdev, "failed initializing T248\n");
