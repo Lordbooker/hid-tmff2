@@ -3,35 +3,6 @@
 #include <linux/hid.h>
 #include "../hid-tmff2.h"
 
-#define T248_MAX_EFFECTS 16
-#define T248_BUFFER_LENGTH 63
-
-static const unsigned long t248_params =
-	PARAM_SPRING_LEVEL
-	| PARAM_DAMPER_LEVEL
-	| PARAM_FRICTION_LEVEL
-	| PARAM_RANGE
-	| PARAM_GAIN
-	;
-
-static const signed short t248_effects[] = {
-	FF_CONSTANT,
-	FF_RAMP,
-	FF_SPRING,
-	FF_DAMPER,
-	FF_FRICTION,
-	FF_INERTIA,
-	FF_PERIODIC,
-	FF_SINE,
-	FF_TRIANGLE,
-	FF_SQUARE,
-	FF_SAW_UP,
-	FF_SAW_DOWN,
-	FF_AUTOCENTER,
-	FF_GAIN,
-	-1
-};
-
 /* TODO: sort through this stuff */
 static u8 t248_pc_rdesc_fixed[] = {
 	0x05, 0x01, /* Usage page (Generic Desktop) */
@@ -110,149 +81,21 @@ static u8 t248_pc_rdesc_fixed[] = {
 	0xc0, /* End collection */
 };
 
-static int t248_wheel_destroy(void *data)
-{
-	struct t300rs_device_entry *t300rs = data;
-
-	if (!t300rs)
-		return -ENODEV;
-
-	kfree(t300rs->send_buffer);
-	kfree(t300rs);
-	return 0;
-}
-
-static int t248_set_range(void *data, uint16_t value)
-{
-	struct t300rs_device_entry *t248 = data;
-
-	if (value < 140) {
-		hid_info(t248->hdev, "value %i too small, clamping to 140\n", value);
-		value = 140;
-	}
-
-	if (value > 900) {
-		hid_info(t248->hdev, "value %i too large, clamping to 900\n", value);
-		value = 900;
-	}
-
-	return t300rs_set_range(data, value);
-}
-
-static int t248_send_open(struct t300rs_device_entry *t248)
-{
-	static const u8 open_0[] = { 0x01, 0x04 };
-	static const u8 open_1[] = { 0x01, 0x05 };
-	int ret;
-
-	if ((ret = t300rs_send_buf(t248, open_0, sizeof(open_0))))
-		return ret;
-
-	return t300rs_send_buf(t248, open_1, sizeof(open_1));
-}
-
-static int t248_open(void *data, int open_mode)
-{
-	struct t300rs_device_entry *t248 = data;
-
-	if (!t248)
-		return -ENODEV;
-
-	if (open_mode)
-		t248_send_open(t248);
-
-	return t248->open(t248->input_dev);
-}
-
-static int t248_send_close(struct t300rs_device_entry *t248)
-{
-	static const u8 close_0[] = { 0x01, 0x05 };
-	static const u8 close_1[] = { 0x01, 0x00 };
-	int ret;
-
-	if ((ret = t300rs_send_buf(t248, close_0, sizeof(close_0))))
-		return ret;
-
-	return t300rs_send_buf(t248, close_1, sizeof(close_1));
-}
-
-static int t248_close(void *data, int open_mode)
-{
-	struct t300rs_device_entry *t248 = data;
-
-	if (!t248)
-		return -ENODEV;
-
-	if (open_mode)
-		t248_send_close(t248);
-
-	t248->close(t248->input_dev);
-	return 0;
-}
-
-static int t248_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
-{
-	struct t300rs_device_entry *t248 = kzalloc(sizeof(struct t300rs_device_entry),
-						   GFP_KERNEL);
-	int ret;
-
-	if (!t248) {
-		ret = -ENOMEM;
-		goto t248_err;
-	}
-
-	if ((ret = t300rs_init_common(tmff2, t248, T248_BUFFER_LENGTH)))
-		goto init_err;
-
-	if ((ret = t300rs_send_setup_interrupts(t248)))
-		goto init_err;
-
-	/* everything went OK */
-	tmff2->data = t248;
-	tmff2->params = t248_params;
-	tmff2->max_effects = T248_MAX_EFFECTS;
-	memcpy(tmff2->supported_effects, t248_effects, sizeof(t248_effects));
-
-	if (!open_mode)
-		t248_send_open(t248);
-
-	hid_info(t248->hdev, "force feedback for T248\n");
-	return 0;
-
-init_err:
-	kfree(t248->send_buffer);
-	kfree(t248);
-t248_err:
-	hid_err(tmff2->hdev, "failed initializing T248\n");
-	return ret;
-}
-
-static __u8 *t248_wheel_fixup(struct hid_device *hdev, __u8 *rdesc,
-		unsigned int *rsize)
-{
-	rdesc = t248_pc_rdesc_fixed;
-	*rsize = sizeof(t248_pc_rdesc_fixed);
-	return rdesc;
-}
+static const struct tm_wheel_desc t248_desc = {
+	.name = "T248",
+	.rdesc = t248_pc_rdesc_fixed,
+	.rsize = sizeof(t248_pc_rdesc_fixed),
+	/* T248 only has 900 degree range, instead of T300RS 1080 */
+	.range_min = 140,
+	.range_max = 900,
+	.params = PARAM_SPRING_LEVEL
+		| PARAM_DAMPER_LEVEL
+		| PARAM_FRICTION_LEVEL
+		| PARAM_RANGE
+		| PARAM_GAIN,
+};
 
 int t248_populate_api(struct tmff2_device_entry *tmff2)
 {
-	tmff2->play_effect = t300rs_play_effect;
-	tmff2->upload_effect = t300rs_upload_effect;
-	tmff2->update_effect = t300rs_update_effect;
-	tmff2->stop_effect = t300rs_stop_effect;
-
-	tmff2->set_gain = t300rs_set_gain;
-	tmff2->set_autocenter = t300rs_set_autocenter;
-	/* T248 only has 900 degree range, instead of T300RS 1080 */
-	tmff2->set_range = t248_set_range;
-	tmff2->wheel_fixup = t248_wheel_fixup;
-
-	tmff2->open = t248_open;
-	tmff2->close = t248_close;
-
-	tmff2->wheel_init = t248_wheel_init;
-	tmff2->wheel_destroy = t248_wheel_destroy;
-
-	return 0;
+	return tm_common_populate_api(tmff2, &t248_desc);
 }

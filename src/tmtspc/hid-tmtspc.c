@@ -3,36 +3,6 @@
 #include <linux/hid.h>
 #include "../hid-tmff2.h"
 
-#define TMTSPC_MAX_EFFECTS 16
-#define TMTSPC_BUFFER_LENGTH 63
-
-static const unsigned long tspc_params =
-	PARAM_SPRING_LEVEL
-	| PARAM_DAMPER_LEVEL
-	| PARAM_FRICTION_LEVEL
-	| PARAM_ALT_MODE
-	| PARAM_RANGE
-	| PARAM_GAIN
-	;
-
-static const signed short tspc_effects[] = {
-	FF_CONSTANT,
-	FF_RAMP,
-	FF_SPRING,
-	FF_DAMPER,
-	FF_FRICTION,
-	FF_INERTIA,
-	FF_PERIODIC,
-	FF_SINE,
-	FF_TRIANGLE,
-	FF_SQUARE,
-	FF_SAW_UP,
-	FF_SAW_DOWN,
-	FF_AUTOCENTER,
-	FF_GAIN,
-	-1
-};
-
 /* TODO: sort through this stuff */
 static u8 tspc_pc_rdesc_fixed[] = {
 	0x05, 0x01, /* Usage page (Generic Desktop) */
@@ -99,131 +69,6 @@ static u8 tspc_pc_rdesc_fixed[] = {
 	0xc0, /* End collection */
 };
 
-static int tspc_wheel_destroy(void *data)
-{
-	struct t300rs_device_entry *t300rs = data;
-
-	if (!t300rs)
-		return -ENODEV;
-
-	kfree(t300rs->send_buffer);
-	kfree(t300rs);
-	return 0;
-}
-
-static int tspc_set_range(void *data, uint16_t value)
-{
-	struct t300rs_device_entry *tspc = data;
-
-	if (value < 140) {
-		hid_info(tspc->hdev, "value %i too small, clamping to 140\n", value);
-		value = 140;
-	}
-
-	if (value > 1080) {
-		hid_info(tspc->hdev, "value %i too large, clamping to 1080\n", value);
-		value = 1080;
-	}
-
-	return t300rs_set_range(data, value);
-}
-
-static int tspc_send_open(struct t300rs_device_entry *tspc)
-{
-	static const u8 open_0[] = { 0x01, 0x04 };
-	static const u8 open_1[] = { 0x01, 0x05 };
-	int ret;
-
-	if ((ret = t300rs_send_buf(tspc, open_0, sizeof(open_0))))
-		return ret;
-
-	return t300rs_send_buf(tspc, open_1, sizeof(open_1));
-}
-
-static int tspc_open(void *data, int open_mode)
-{
-	struct t300rs_device_entry *tspc = data;
-
-	if (!tspc)
-		return -ENODEV;
-
-	if (open_mode)
-		tspc_send_open(tspc);
-
-	return tspc->open(tspc->input_dev);
-}
-
-static int tspc_send_close(struct t300rs_device_entry *tspc)
-{
-	static const u8 close_0[] = { 0x01, 0x05 };
-	static const u8 close_1[] = { 0x01, 0x00 };
-	int ret;
-
-	if ((ret = t300rs_send_buf(tspc, close_0, sizeof(close_0))))
-		return ret;
-
-	return t300rs_send_buf(tspc, close_1, sizeof(close_1));
-}
-
-static int tspc_close(void *data, int open_mode)
-{
-	struct t300rs_device_entry *tspc = data;
-
-	if (!tspc)
-		return -ENODEV;
-
-	if (open_mode)
-		tspc_send_close(tspc);
-
-	tspc->close(tspc->input_dev);
-	return 0;
-}
-
-static int tspc_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
-{
-	struct t300rs_device_entry *tspc = kzalloc(sizeof(struct t300rs_device_entry),
-						   GFP_KERNEL);
-	int ret;
-
-	if (!tspc) {
-		ret = -ENOMEM;
-		goto tspc_err;
-	}
-
-	if ((ret = t300rs_init_common(tmff2, tspc, TMTSPC_BUFFER_LENGTH)))
-		goto init_err;
-
-	if ((ret = t300rs_send_setup_interrupts(tspc)))
-		goto init_err;
-
-	/* everything went OK */
-	tmff2->data = tspc;
-	tmff2->params = tspc_params;
-	tmff2->max_effects = TMTSPC_MAX_EFFECTS;
-	memcpy(tmff2->supported_effects, tspc_effects, sizeof(tspc_effects));
-
-	if (!open_mode)
-		tspc_send_open(tspc);
-
-	hid_info(tspc->hdev, "force feedback for TS-PC\n");
-	return 0;
-
-init_err:
-	kfree(tspc->send_buffer);
-	kfree(tspc);
-tspc_err:
-	hid_err(tmff2->hdev, "failed initializing TS-PC\n");
-	return ret;
-}
-
-static __u8 *tspc_wheel_fixup(struct hid_device *hdev, __u8 *rdesc,
-		unsigned int *rsize)
-{
-	rdesc = tspc_pc_rdesc_fixed;
-	*rsize = sizeof(tspc_pc_rdesc_fixed);
-	return rdesc;
-}
-
 static ssize_t tspc_alt_mode_store(void *data, const char *buf, size_t count)
 {
 	struct t300rs_device_entry *tspc = data;
@@ -245,26 +90,23 @@ static ssize_t tspc_alt_mode_store(void *data, const char *buf, size_t count)
 	return count;
 }
 
+static const struct tm_wheel_desc tspc_desc = {
+	.name = "TS-PC",
+	.rdesc = tspc_pc_rdesc_fixed,
+	.rsize = sizeof(tspc_pc_rdesc_fixed),
+	/* TS-PC has 1080 degree range, like T300RS */
+	.range_min = 140,
+	.range_max = 1080,
+	.params = PARAM_SPRING_LEVEL
+		| PARAM_DAMPER_LEVEL
+		| PARAM_FRICTION_LEVEL
+		| PARAM_ALT_MODE
+		| PARAM_RANGE
+		| PARAM_GAIN,
+	.alt_mode_store = tspc_alt_mode_store,
+};
+
 int tspc_populate_api(struct tmff2_device_entry *tmff2)
 {
-	tmff2->play_effect = t300rs_play_effect;
-	tmff2->upload_effect = t300rs_upload_effect;
-	tmff2->update_effect = t300rs_update_effect;
-	tmff2->stop_effect = t300rs_stop_effect;
-
-	tmff2->set_gain = t300rs_set_gain;
-	tmff2->set_autocenter = t300rs_set_autocenter;
-	/* TS-PC has 1080 degree range, like T300RS 1080 */
-	tmff2->set_range = tspc_set_range;
-	tmff2->wheel_fixup = tspc_wheel_fixup;
-
-	tmff2->open = tspc_open;
-	tmff2->close = tspc_close;
-
-	tmff2->alt_mode_store = tspc_alt_mode_store;
-
-	tmff2->wheel_init = tspc_wheel_init;
-	tmff2->wheel_destroy = tspc_wheel_destroy;
-
-	return 0;
+	return tm_common_populate_api(tmff2, &tspc_desc);
 }

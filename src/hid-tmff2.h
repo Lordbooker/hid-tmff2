@@ -42,6 +42,8 @@ struct tmff2_effect_state {
 	unsigned long start_time;
 };
 
+struct tm_wheel_desc;
+
 struct tmff2_device_entry {
 	struct hid_device *hdev;
 	struct input_dev *input_dev;
@@ -64,6 +66,8 @@ struct tmff2_device_entry {
 
 	/* fields relevant to each actual device (T300, T248...) */
 	void *data;
+	/* only set for wheels using the shared tmcommon backend */
+	const struct tm_wheel_desc *wheel_desc;
 	unsigned long params;
 	unsigned long max_effects;
 	signed short supported_effects[FF_CNT];
@@ -160,5 +164,20 @@ int t300rs_init_common(struct tmff2_device_entry *tmff2,
 		struct t300rs_device_entry *t300rs, u8 buffer_length);
 /* send the setup sequence used by T248, TX, TS-XW and TS-PC */
 int t300rs_send_setup_interrupts(struct t300rs_device_entry *t300rs);
+
+/* description of a wheel handled by the shared tmcommon backend */
+struct tm_wheel_desc {
+	const char *name;
+	__u8 *rdesc;
+	unsigned int rsize;
+	u16 range_min;
+	u16 range_max;
+	unsigned long params;
+	/* optional */
+	ssize_t (*alt_mode_store)(void *data, const char *buf, size_t count);
+};
+
+int tm_common_populate_api(struct tmff2_device_entry *tmff2,
+		const struct tm_wheel_desc *desc);
 
 #endif

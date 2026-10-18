@@ -3,35 +3,6 @@
 #include <linux/hid.h>
 #include "../hid-tmff2.h"
 
-#define TMTSXW_MAX_EFFECTS 16
-#define TMTSXW_BUFFER_LENGTH 63
-
-static const unsigned long tsxw_params =
-	PARAM_SPRING_LEVEL
-	| PARAM_DAMPER_LEVEL
-	| PARAM_FRICTION_LEVEL
-	| PARAM_RANGE
-	| PARAM_GAIN
-	;
-
-static const signed short tsxw_effects[] = {
-	FF_CONSTANT,
-	FF_RAMP,
-	FF_SPRING,
-	FF_DAMPER,
-	FF_FRICTION,
-	FF_INERTIA,
-	FF_PERIODIC,
-	FF_SINE,
-	FF_TRIANGLE,
-	FF_SQUARE,
-	FF_SAW_UP,
-	FF_SAW_DOWN,
-	FF_AUTOCENTER,
-	FF_GAIN,
-	-1
-};
-
 /* TODO: sort through this stuff */
 static u8 tsxw_pc_rdesc_fixed[] = {
 	0x05, 0x01, /* Usage page (Generic Desktop) */
@@ -98,149 +69,21 @@ static u8 tsxw_pc_rdesc_fixed[] = {
 	0xc0, /* End collection */
 };
 
-static int tsxw_wheel_destroy(void *data)
-{
-	struct t300rs_device_entry *t300rs = data;
-
-	if (!t300rs)
-		return -ENODEV;
-
-	kfree(t300rs->send_buffer);
-	kfree(t300rs);
-	return 0;
-}
-
-static int tsxw_set_range(void *data, uint16_t value)
-{
-	struct t300rs_device_entry *tsxw = data;
-
-	if (value < 140) {
-		hid_info(tsxw->hdev, "value %i too small, clamping to 140\n", value);
-		value = 140;
-	}
-
-	if (value > 1080) {
-		hid_info(tsxw->hdev, "value %i too large, clamping to 1080\n", value);
-		value = 1080;
-	}
-
-	return t300rs_set_range(data, value);
-}
-
-static int tsxw_send_open(struct t300rs_device_entry *tsxw)
-{
-	static const u8 open_0[] = { 0x01, 0x04 };
-	static const u8 open_1[] = { 0x01, 0x05 };
-	int ret;
-
-	if ((ret = t300rs_send_buf(tsxw, open_0, sizeof(open_0))))
-		return ret;
-
-	return t300rs_send_buf(tsxw, open_1, sizeof(open_1));
-}
-
-static int tsxw_open(void *data, int open_mode)
-{
-	struct t300rs_device_entry *tsxw = data;
-
-	if (!tsxw)
-		return -ENODEV;
-
-	if (open_mode)
-		tsxw_send_open(tsxw);
-
-	return tsxw->open(tsxw->input_dev);
-}
-
-static int tsxw_send_close(struct t300rs_device_entry *tsxw)
-{
-	static const u8 close_0[] = { 0x01, 0x05 };
-	static const u8 close_1[] = { 0x01, 0x00 };
-	int ret;
-
-	if ((ret = t300rs_send_buf(tsxw, close_0, sizeof(close_0))))
-		return ret;
-
-	return t300rs_send_buf(tsxw, close_1, sizeof(close_1));
-}
-
-static int tsxw_close(void *data, int open_mode)
-{
-	struct t300rs_device_entry *tsxw = data;
-
-	if (!tsxw)
-		return -ENODEV;
-
-	if (open_mode)
-		tsxw_send_close(tsxw);
-
-	tsxw->close(tsxw->input_dev);
-	return 0;
-}
-
-static int tsxw_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
-{
-	struct t300rs_device_entry *tsxw = kzalloc(sizeof(struct t300rs_device_entry),
-						   GFP_KERNEL);
-	int ret;
-
-	if (!tsxw) {
-		ret = -ENOMEM;
-		goto tsxw_err;
-	}
-
-	if ((ret = t300rs_init_common(tmff2, tsxw, TMTSXW_BUFFER_LENGTH)))
-		goto init_err;
-
-	if ((ret = t300rs_send_setup_interrupts(tsxw)))
-		goto init_err;
-
-	/* everything went OK */
-	tmff2->data = tsxw;
-	tmff2->params = tsxw_params;
-	tmff2->max_effects = TMTSXW_MAX_EFFECTS;
-	memcpy(tmff2->supported_effects, tsxw_effects, sizeof(tsxw_effects));
-
-	if (!open_mode)
-		tsxw_send_open(tsxw);
-
-	hid_info(tsxw->hdev, "force feedback for TS-XW\n");
-	return 0;
-
-init_err:
-	kfree(tsxw->send_buffer);
-	kfree(tsxw);
-tsxw_err:
-	hid_err(tmff2->hdev, "failed initializing TS-XW\n");
-	return ret;
-}
-
-static __u8 *tsxw_wheel_fixup(struct hid_device *hdev, __u8 *rdesc,
-		unsigned int *rsize)
-{
-	rdesc = tsxw_pc_rdesc_fixed;
-	*rsize = sizeof(tsxw_pc_rdesc_fixed);
-	return rdesc;
-}
+static const struct tm_wheel_desc tsxw_desc = {
+	.name = "TS-XW",
+	.rdesc = tsxw_pc_rdesc_fixed,
+	.rsize = sizeof(tsxw_pc_rdesc_fixed),
+	/* TS-XW has 1080 degree range, just like T300RS */
+	.range_min = 140,
+	.range_max = 1080,
+	.params = PARAM_SPRING_LEVEL
+		| PARAM_DAMPER_LEVEL
+		| PARAM_FRICTION_LEVEL
+		| PARAM_RANGE
+		| PARAM_GAIN,
+};
 
 int tsxw_populate_api(struct tmff2_device_entry *tmff2)
 {
-	tmff2->play_effect = t300rs_play_effect;
-	tmff2->upload_effect = t300rs_upload_effect;
-	tmff2->update_effect = t300rs_update_effect;
-	tmff2->stop_effect = t300rs_stop_effect;
-
-	tmff2->set_gain = t300rs_set_gain;
-	tmff2->set_autocenter = t300rs_set_autocenter;
-	/* TS-XW has 1080 degree range, just like T300RS 1080 */
-	tmff2->set_range = tsxw_set_range;
-	tmff2->wheel_fixup = tsxw_wheel_fixup;
-
-	tmff2->open = tsxw_open;
-	tmff2->close = tsxw_close;
-
-	tmff2->wheel_init = tsxw_wheel_init;
-	tmff2->wheel_destroy = tsxw_wheel_destroy;
-
-	return 0;
+	return tm_common_populate_api(tmff2, &tsxw_desc);
 }
