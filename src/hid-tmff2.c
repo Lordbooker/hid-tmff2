@@ -20,28 +20,53 @@ module_param(open_mode, int, 0660);
 MODULE_PARM_DESC(open_mode,
 		"Whether to send mode change commands on open/close");
 
-int timer_msecs = DEFAULT_TIMER_PERIOD;
-module_param(timer_msecs, int, 0660);
-MODULE_PARM_DESC(timer_msecs,
-		"Timer resolution in msecs");
+#define TIMER_MSECS_MIN 1
+#define TIMER_MSECS_MAX 1000
+static int timer_msecs = DEFAULT_TIMER_PERIOD;
 
-/* should these be removed and just rely on /sys? */
-int spring_level = 30;
+/* timer_msecs is writable at runtime, so reject values that would make the
+ * work handler spin (0) or end up with nonsensical delays (negative) */
+static int timer_msecs_set(const char *val, const struct kernel_param *kp)
+{
+	int value, ret;
+
+	ret = kstrtoint(val, 0, &value);
+	if (ret)
+		return ret;
+
+	if (value < TIMER_MSECS_MIN || value > TIMER_MSECS_MAX)
+		return -EINVAL;
+
+	WRITE_ONCE(*(int *)kp->arg, value);
+	return 0;
+}
+
+static const struct kernel_param_ops timer_msecs_ops = {
+	.set = timer_msecs_set,
+	.get = param_get_int,
+};
+module_param_cb(timer_msecs, &timer_msecs_ops, &timer_msecs, 0660);
+MODULE_PARM_DESC(timer_msecs,
+		"Timer resolution in msecs (1-1000)");
+
+/* the following parameters are only defaults for newly connected wheels, each
+ * wheel keeps its own copy that can be changed through sysfs */
+static int spring_level = 30;
 module_param(spring_level, int, 0);
 MODULE_PARM_DESC(spring_level,
 		"Level of spring force (0-100), as per Oversteer standards");
 
-int damper_level = 30;
+static int damper_level = 30;
 module_param(damper_level, int, 0);
 MODULE_PARM_DESC(damper_level,
 		"Level of damper force (0-100), as per Oversteer standards");
 
-int friction_level = 30;
+static int friction_level = 30;
 module_param(friction_level, int, 0);
 MODULE_PARM_DESC(friction_level,
 		"Level of friction force (0-100), as per Oversteer standards");
 
-int range = 900;
+static int range = 900;
 module_param(range, int, 0);
 MODULE_PARM_DESC(range,
 		"Range of wheel, depends on the wheel. Invalid values are ignored");
@@ -52,14 +77,16 @@ MODULE_PARM_DESC(alt_mode,
 		"Alternate mode, eg. F1 mode");
 
 #define GAIN_MAX 65535
-u16 gain = 40000;
+static u16 gain = 40000;
 module_param(gain, ushort, 0);
 MODULE_PARM_DESC(gain,
 		"Level of gain (0-65535)");
 
-static u16 tmff2_scale_gain(u16 value)
+#define LEVEL_MAX 100
+
+static u16 tmff2_scale_gain(struct tmff2_device_entry *tmff2, u16 value)
 {
-	return DIV_ROUND_CLOSEST((u32)value * gain, GAIN_MAX);
+	return DIV_ROUND_CLOSEST((u32)value * READ_ONCE(tmff2->gain), GAIN_MAX);
 }
 
 static struct tmff2_device_entry *tmff2_from_hdev(struct hid_device *hdev)
@@ -84,114 +111,119 @@ static struct tmff2_device_entry *tmff2_from_input(struct input_dev *input_dev)
 	return tmff2_from_hdev(hdev);
 }
 
-static ssize_t spring_level_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
+static struct tmff2_device_entry *tmff2_from_dev(struct device *dev)
+{
+	return tmff2_from_hdev(to_hid_device(dev));
+}
+
+/* common parsing for the spring/damper/friction level attributes */
+static ssize_t tmff2_level_store(struct device *dev, int *level,
+		const char *buf, size_t count)
 {
 	unsigned int value;
 	int ret;
 
 	ret = kstrtouint(buf, 0, &value);
-	if (ret) {
-		dev_err(dev, "kstrtouint failed at spring_level_store: %i", ret);
+	if (ret)
 		return ret;
+
+	if (value > LEVEL_MAX) {
+		dev_info_ratelimited(dev, "value %u larger than max %d, clamping to %d\n",
+				value, LEVEL_MAX, LEVEL_MAX);
+		value = LEVEL_MAX;
 	}
 
-	if (value > 100) {
-		dev_info(dev, "value %i larger than max 100, clamping to 100.\n", value);
-		value = 100;
-	}
-
-	spring_level = value;
-
+	WRITE_ONCE(*level, value);
 	return count;
+}
+
+static ssize_t spring_level_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+
+	if (!tmff2)
+		return -ENODEV;
+
+	return tmff2_level_store(dev, &tmff2->spring_level, buf, count);
 }
 
 static ssize_t spring_level_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", spring_level);
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+
+	if (!tmff2)
+		return -ENODEV;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", READ_ONCE(tmff2->spring_level));
 }
 static DEVICE_ATTR_RW(spring_level);
 
 static ssize_t damper_level_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	unsigned int value;
-	int ret;
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
 
+	if (!tmff2)
+		return -ENODEV;
 
-	ret = kstrtouint(buf, 0, &value);
-	if (ret) {
-		dev_err(dev, "kstrtouint failed at damper_level_store: %i", ret);
-		return ret;
-	}
-
-	if (value > 100) {
-		dev_info(dev, "value %i larger than max 100, clamping to 100.\n", value);
-		value = 100;
-	}
-
-	damper_level = value;
-
-	return count;
+	return tmff2_level_store(dev, &tmff2->damper_level, buf, count);
 }
 
 static ssize_t damper_level_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", damper_level);
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+
+	if (!tmff2)
+		return -ENODEV;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", READ_ONCE(tmff2->damper_level));
 }
 static DEVICE_ATTR_RW(damper_level);
 
 static ssize_t friction_level_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	unsigned int value;
-	int ret;
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
 
+	if (!tmff2)
+		return -ENODEV;
 
-	ret = kstrtouint(buf, 0, &value);
-	if (ret) {
-		dev_err(dev, "kstrtouint failed at friction_level_store: %i", ret);
-		return ret;
-	}
-
-	if (value > 100) {
-		dev_info(dev, "value %i larger than max 100, clamping to 100.\n", value);
-		value = 100;
-	}
-
-	friction_level = value;
-
-	return count;
+	return tmff2_level_store(dev, &tmff2->friction_level, buf, count);
 }
 
 static ssize_t friction_level_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", friction_level);
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+
+	if (!tmff2)
+		return -ENODEV;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", READ_ONCE(tmff2->friction_level));
 }
 static DEVICE_ATTR_RW(friction_level);
 
 static ssize_t range_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	struct tmff2_device_entry *tmff2 = tmff2_from_hdev(to_hid_device(dev));
-	unsigned int value;
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+	u16 value;
 	int ret;
 
 	if (!tmff2)
 		return -ENODEV;
 
-	if ((ret = kstrtouint(buf, 0, &value))) {
-		hid_err(tmff2->hdev, "kstrtouint failed at range_store: %i", ret);
+	if ((ret = kstrtou16(buf, 0, &value)))
 		return ret;
-	}
 
-	if (tmff2->set_range) {
-		if ((ret = tmff2->set_range(tmff2->data, value)))
-			return ret;
-	}
+	if (!tmff2->set_range)
+		return -EOPNOTSUPP;
+
+	if ((ret = tmff2->set_range(tmff2->data, value)))
+		return ret;
 
 	return count;
 }
@@ -199,28 +231,34 @@ static ssize_t range_store(struct device *dev,
 static ssize_t range_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", range);
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+
+	if (!tmff2)
+		return -ENODEV;
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", READ_ONCE(tmff2->range));
 }
 static DEVICE_ATTR_RW(range);
 
 static ssize_t alternate_modes_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	struct tmff2_device_entry *tmff2 = tmff2_from_hdev(to_hid_device(dev));
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
 
 	if (!tmff2)
 		return -ENODEV;
 
-	if (tmff2->alt_mode_store)
-		return tmff2->alt_mode_store(tmff2->data, buf, count);
+	/* returning 0 from a store makes some userspace tools retry forever */
+	if (!tmff2->alt_mode_store)
+		return -EOPNOTSUPP;
 
-	return 0;
+	return tmff2->alt_mode_store(tmff2->data, buf, count);
 }
 
 static ssize_t alternate_modes_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct tmff2_device_entry *tmff2 = tmff2_from_hdev(to_hid_device(dev));
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
 
 	if (!tmff2)
 		return -ENODEV;
@@ -235,7 +273,7 @@ static DEVICE_ATTR_RW(alternate_modes);
 static ssize_t gain_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	struct tmff2_device_entry *tmff2 = tmff2_from_hdev(to_hid_device(dev));
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
 	u16 value;
 	int ret;
 
@@ -243,14 +281,12 @@ static ssize_t gain_store(struct device *dev,
 		return -ENODEV;
 
 	ret = kstrtou16(buf, 0, &value);
-	if (ret) {
-		dev_err(dev, "failed to parse gain: %d\n", ret);
+	if (ret)
 		return ret;
-	}
 
-	gain = value;
+	WRITE_ONCE(tmff2->gain, value);
 	if (tmff2->set_gain) /* if we can, update gain immediately */
-		tmff2->set_gain(tmff2->data, gain);
+		tmff2->set_gain(tmff2->data, value);
 
 	return count;
 }
@@ -258,9 +294,58 @@ static ssize_t gain_store(struct device *dev,
 static ssize_t gain_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", gain);
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+
+	if (!tmff2)
+		return -ENODEV;
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", READ_ONCE(tmff2->gain));
 }
 static DEVICE_ATTR_RW(gain);
+
+static struct attribute *tmff2_attrs[] = {
+	&dev_attr_gain.attr,
+	&dev_attr_alternate_modes.attr,
+	&dev_attr_range.attr,
+	&dev_attr_spring_level.attr,
+	&dev_attr_damper_level.attr,
+	&dev_attr_friction_level.attr,
+	NULL
+};
+
+/* only show the attributes the connected wheel actually supports */
+static umode_t tmff2_attr_is_visible(struct kobject *kobj,
+		struct attribute *attr, int n)
+{
+	struct device *dev = kobj_to_dev(kobj);
+	struct tmff2_device_entry *tmff2 = hid_get_drvdata(to_hid_device(dev));
+	unsigned long param;
+
+	if (!tmff2)
+		return 0;
+
+	if (attr == &dev_attr_gain.attr)
+		param = PARAM_GAIN;
+	else if (attr == &dev_attr_alternate_modes.attr)
+		param = PARAM_ALT_MODE;
+	else if (attr == &dev_attr_range.attr)
+		param = PARAM_RANGE;
+	else if (attr == &dev_attr_spring_level.attr)
+		param = PARAM_SPRING_LEVEL;
+	else if (attr == &dev_attr_damper_level.attr)
+		param = PARAM_DAMPER_LEVEL;
+	else if (attr == &dev_attr_friction_level.attr)
+		param = PARAM_FRICTION_LEVEL;
+	else
+		return 0;
+
+	return (tmff2->params & param) ? attr->mode : 0;
+}
+
+static const struct attribute_group tmff2_attr_group = {
+	.attrs = tmff2_attrs,
+	.is_visible = tmff2_attr_is_visible,
+};
 
 static void tmff2_set_gain(struct input_dev *dev, uint16_t value)
 {
@@ -274,7 +359,7 @@ static void tmff2_set_gain(struct input_dev *dev, uint16_t value)
 		return;
 	}
 
-	if (tmff2->set_gain(tmff2->data, tmff2_scale_gain(value)))
+	if (tmff2->set_gain(tmff2->data, tmff2_scale_gain(tmff2, value)))
 		hid_warn(tmff2->hdev, "unable to set gain\n");
 }
 
@@ -301,7 +386,7 @@ static void tmff2_work_handler(struct work_struct *w)
 	struct tmff2_device_entry *tmff2 = container_of(dw, struct tmff2_device_entry, work);
 	struct tmff2_effect_state *state;
 	int max_count = 0, effect_id;
-	unsigned long time_now;
+	unsigned int elapsed;
 	__u16 effect_delay, effect_length;
 
 
@@ -312,8 +397,6 @@ static void tmff2_work_handler(struct work_struct *w)
 		unsigned long actions = 0;
 		struct tmff2_effect_state effect;
 
-		time_now = JIFFIES2MS(jiffies);
-
 		state = &tmff2->states[effect_id];
 
 		/* critical section for updating state flags, keep log of what
@@ -323,8 +406,12 @@ static void tmff2_work_handler(struct work_struct *w)
 		effect_delay = state->effect.replay.delay;
 		effect_length = state->effect.replay.length;
 		if (test_bit(FF_EFFECT_PLAYING, &state->flags) && effect_length) {
-			if ((time_now - state->start_time) >=
-					(effect_delay + effect_length) * state->count) {
+			/* jiffies_to_msecs() of the difference is safe against
+			 * jiffies wrapping around, 64 bit math avoids overflows
+			 * with large repeat counts */
+			elapsed = jiffies_to_msecs(jiffies - state->start_time);
+			if ((u64)elapsed >=
+					(u64)(effect_delay + effect_length) * state->count) {
 				__clear_bit(FF_EFFECT_PLAYING, &state->flags);
 				__clear_bit(FF_EFFECT_QUEUE_UPDATE, &state->flags);
 
@@ -397,7 +484,8 @@ static void tmff2_work_handler(struct work_struct *w)
 	}
 
 	if (max_count && READ_ONCE(tmff2->allow_scheduling))
-		schedule_delayed_work(&tmff2->work, msecs_to_jiffies(timer_msecs));
+		schedule_delayed_work(&tmff2->work,
+				msecs_to_jiffies(READ_ONCE(timer_msecs)));
 }
 
 static void tmff2_rewrite_rumble(struct ff_effect *effect)
@@ -471,13 +559,11 @@ static int tmff2_play(struct input_dev *dev, int effect_id, int value)
 		return -ENODEV;
 
 	state = &tmff2->states[effect_id];
-	if (!state)
-		return 0;
 
 	spin_lock_irqsave(&tmff2->lock, lock_flags);
 	if (value > 0) {
 		state->count = value;
-		state->start_time = JIFFIES2MS(jiffies);
+		state->start_time = jiffies;
 		__set_bit(FF_EFFECT_QUEUE_START, &state->flags);
 		__clear_bit(FF_EFFECT_QUEUE_STOP, &state->flags);
 	} else {
@@ -501,7 +587,7 @@ static int tmff2_open(struct input_dev *dev)
 		return -ENODEV;
 
 	if (tmff2->open)
-		return tmff2->open(tmff2->data, open_mode);
+		return tmff2->open(tmff2->data, READ_ONCE(open_mode));
 
 	hid_err(tmff2->hdev, "no open callback set\n");
 	return -EINVAL;
@@ -520,76 +606,11 @@ static void tmff2_close(struct input_dev *dev)
 	cancel_delayed_work_sync(&tmff2->work);
 
 	if (tmff2->close) {
-		tmff2->close(tmff2->data, open_mode);
+		tmff2->close(tmff2->data, READ_ONCE(open_mode));
 		return;
 	}
 
 	hid_err(tmff2->hdev, "no close callback set\n");
-}
-
-static int tmff2_create_files(struct tmff2_device_entry *tmff2)
-{
-	struct device *dev = &tmff2->hdev->dev;
-	int ret;
-
-
-	/* could use short circuiting but this is more explicit */
-	if (tmff2->params & PARAM_GAIN) {
-		if ((ret = device_create_file(dev, &dev_attr_gain))) {
-			hid_err(tmff2->hdev, "unable to create sysfs for gain\n");
-			goto gain_err;
-		}
-	}
-
-	if (tmff2->params & PARAM_ALT_MODE) {
-		if ((ret = device_create_file(dev, &dev_attr_alternate_modes))) {
-			hid_err(tmff2->hdev, "unable to create sysfs for alternate_modes\n");
-			goto alt_err;
-		}
-	}
-
-	if (tmff2->params & PARAM_RANGE) {
-		if ((ret = device_create_file(dev, &dev_attr_range))) {
-			hid_warn(tmff2->hdev, "unable to create sysfs for range\n");
-			goto range_err;
-		}
-	}
-
-	if (tmff2->params & PARAM_SPRING_LEVEL) {
-		if ((ret = device_create_file(dev, &dev_attr_spring_level))) {
-			hid_warn(tmff2->hdev, "unable to create sysfs for spring_level\n");
-			goto spring_err;
-		}
-	}
-
-	if (tmff2->params & PARAM_DAMPER_LEVEL) {
-		if ((ret = device_create_file(dev, &dev_attr_damper_level))) {
-			hid_warn(tmff2->hdev, "unable to create sysfs for damper_level\n");
-			goto damper_err;
-		}
-	}
-
-	if (tmff2->params & PARAM_FRICTION_LEVEL) {
-		if ((ret = device_create_file(dev, &dev_attr_friction_level))) {
-			hid_warn(tmff2->hdev, "unable to create sysfs for friction_level\n");
-			goto friction_err;
-		}
-	}
-
-	return 0;
-
-friction_err:
-	device_remove_file(dev, &dev_attr_damper_level);
-damper_err:
-	device_remove_file(dev, &dev_attr_spring_level);
-spring_err:
-	device_remove_file(dev, &dev_attr_range);
-range_err:
-	device_remove_file(dev, &dev_attr_alternate_modes);
-alt_err:
-	device_remove_file(dev, &dev_attr_gain);
-gain_err:
-	return ret;
 }
 
 static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
@@ -605,7 +626,7 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 		goto err;
 
 
-	tmff2->states = kzalloc(sizeof(struct tmff2_effect_state) * tmff2->max_effects,
+	tmff2->states = kcalloc(tmff2->max_effects, sizeof(struct tmff2_effect_state),
 			GFP_KERNEL);
 
 	if (!tmff2->states) {
@@ -649,21 +670,23 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 	/* set defaults wherever possible */
 	if (tmff2->set_gain) {
 		ff->set_gain = tmff2_set_gain;
-		tmff2->set_gain(tmff2->data, gain);
+		tmff2->set_gain(tmff2->data, tmff2->gain);
 	}
 
 	if (tmff2->set_autocenter)
 		ff->set_autocenter = tmff2_set_autocenter;
 
 	if (tmff2->set_range)
-		tmff2->set_range(tmff2->data, range);
+		tmff2->set_range(tmff2->data, tmff2->range);
 
 	if (tmff2->switch_mode)
 		tmff2->switch_mode(tmff2->data, alt_mode);
 
-	/* create files */
-	if ((ret = tmff2_create_files(tmff2)))
+	/* create sysfs files, which ones are visible depends on params */
+	if ((ret = sysfs_create_group(&tmff2->hdev->dev.kobj, &tmff2_attr_group))) {
+		hid_err(tmff2->hdev, "unable to create sysfs files\n");
 		goto file_err;
+	}
 
 	WRITE_ONCE(tmff2->allow_scheduling, 1);
 	return 0;
@@ -672,6 +695,7 @@ file_err:
 	input_ff_destroy(tmff2->input_dev);
 ff_err:
 	kfree(tmff2->states);
+	tmff2->states = NULL;
 err:
 	return ret;
 }
@@ -695,6 +719,13 @@ static int tmff2_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 	tmff2->hdev = hdev;
 	hid_set_drvdata(tmff2->hdev, tmff2);
+
+	/* per-device settings, initialized from the module parameters */
+	tmff2->spring_level = clamp(spring_level, 0, LEVEL_MAX);
+	tmff2->damper_level = clamp(damper_level, 0, LEVEL_MAX);
+	tmff2->friction_level = clamp(friction_level, 0, LEVEL_MAX);
+	tmff2->range = clamp(range, 0, U16_MAX);
+	tmff2->gain = gain;
 
 	switch (tmff2->hdev->product) {
 		case TMT300RS_PS3_NORM_ID:
@@ -787,7 +818,6 @@ static const __u8 *tmff2_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 static void tmff2_remove(struct hid_device *hdev)
 {
 	struct tmff2_device_entry *tmff2 = tmff2_from_hdev(hdev);
-	struct device *dev;
 
 	if (!tmff2)
 		return;
@@ -799,24 +829,7 @@ static void tmff2_remove(struct hid_device *hdev)
 	WRITE_ONCE(tmff2->allow_scheduling, 0);
 	cancel_delayed_work_sync(&tmff2->work);
 
-	dev = &tmff2->hdev->dev;
-	if (tmff2->params & PARAM_FRICTION_LEVEL)
-		device_remove_file(dev, &dev_attr_friction_level);
-
-	if (tmff2->params & PARAM_DAMPER_LEVEL)
-		device_remove_file(dev, &dev_attr_damper_level);
-
-	if (tmff2->params & PARAM_SPRING_LEVEL)
-		device_remove_file(dev, &dev_attr_spring_level);
-
-	if (tmff2->params & PARAM_RANGE)
-		device_remove_file(dev, &dev_attr_range);
-
-	if (tmff2->params & PARAM_ALT_MODE)
-		device_remove_file(dev, &dev_attr_alternate_modes);
-
-	if (tmff2->params & PARAM_GAIN)
-		device_remove_file(dev, &dev_attr_gain);
+	sysfs_remove_group(&tmff2->hdev->dev.kobj, &tmff2_attr_group);
 
 	hid_hw_stop(hdev);
 	cancel_delayed_work_sync(&tmff2->work);

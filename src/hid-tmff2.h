@@ -7,12 +7,6 @@
 #include <linux/ktime.h>
 #include <linux/input.h>
 
-extern int timer_msecs;
-extern int spring_level;
-extern int damper_level;
-extern int friction_level;
-extern int range;
-extern u16 gain;
 extern int alt_mode;
 
 #define USB_VENDOR_ID_THRUSTMASTER 0x044f
@@ -38,19 +32,13 @@ extern int alt_mode;
 #define PARAM_ALT_MODE		(1 << 4)
 #define PARAM_GAIN		(1 << 5)
 
-#undef fixp_sin16
-#define fixp_sin16(v) (((v % 360) > 180) ?\
-		-(fixp_sin32((v % 360) - 180) >> 16)\
-		: fixp_sin32(v) >> 16)
-
-#define JIFFIES2MS(jiffies) ((jiffies) * 1000 / HZ)
-
 struct tmff2_effect_state {
 	struct ff_effect effect;
 	struct ff_effect old;
 
 	unsigned long flags;
 	unsigned long count;
+	/* in jiffies */
 	unsigned long start_time;
 };
 
@@ -66,6 +54,13 @@ struct tmff2_device_entry {
 	spinlock_t lock;
 
 	int allow_scheduling;
+
+	/* per-device settings, changeable through sysfs */
+	int spring_level;
+	int damper_level;
+	int friction_level;
+	u16 range;
+	u16 gain;
 
 	/* fields relevant to each actual device (T300, T248...) */
 	void *data;
@@ -128,6 +123,7 @@ struct t300rs_device_entry {
 	struct hid_report *report;
 	struct hid_field *ff_field;
 	struct usb_device *usbdev;
+	struct tmff2_device_entry *tmff2;
 
 	int (*open)(struct input_dev *dev);
 	void (*close)(struct input_dev *dev);

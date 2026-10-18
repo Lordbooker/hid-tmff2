@@ -332,7 +332,7 @@ static u8 t300rs_rdesc_ps4_fixed[] = {
 	0xc0,
 };
 
-static u8 condition_values[] = {
+static const u8 condition_values[] = {
 	0xfe, 0xff, 0xfe, 0xff, 0xfe,
 	0xff, 0xfe, 0xff
 };
@@ -403,20 +403,21 @@ static uint8_t t300rs_condition_effect_type(uint16_t effect_type)
 	return 0x07;
 }
 
-static int16_t t300rs_calculate_coefficient(int16_t coeff, uint16_t effect_type)
+static int16_t t300rs_calculate_coefficient(struct t300rs_device_entry *t300rs,
+		int16_t coeff, uint16_t effect_type)
 {
-	uint8_t input_level;
+	int input_level;
 
 	switch (effect_type)
 	{
 	case FF_SPRING:
-		input_level = spring_level;
+		input_level = READ_ONCE(t300rs->tmff2->spring_level);
 		break;
 	case FF_DAMPER:
-		input_level = damper_level;
+		input_level = READ_ONCE(t300rs->tmff2->damper_level);
 		break;
 	case FF_FRICTION:
-		input_level = friction_level;
+		input_level = READ_ONCE(t300rs->tmff2->friction_level);
 		break;
 	default:
 		input_level = 100;
@@ -729,11 +730,11 @@ static int t300rs_update_condition(struct t300rs_device_entry *t300rs,
 	uint16_t right_coeff, right_coeff_old, left_coeff, left_coeff_old;
 	int16_t right_deadband, right_deadband_old, left_deadband, left_deadband_old;
 
-	right_coeff = t300rs_calculate_coefficient(cond.right_coeff, effect.type);
-	right_coeff_old = t300rs_calculate_coefficient(cond_old.right_coeff, old.type);
+	right_coeff = t300rs_calculate_coefficient(t300rs, cond.right_coeff, effect.type);
+	right_coeff_old = t300rs_calculate_coefficient(t300rs, cond_old.right_coeff, old.type);
 
-	left_coeff = t300rs_calculate_coefficient(cond.left_coeff, effect.type);
-	left_coeff_old = t300rs_calculate_coefficient(cond_old.left_coeff, old.type);
+	left_coeff = t300rs_calculate_coefficient(t300rs, cond.left_coeff, effect.type);
+	left_coeff_old = t300rs_calculate_coefficient(t300rs, cond_old.left_coeff, old.type);
 
 	t300rs_calculate_deadband(&right_deadband, &left_deadband,
 		cond.deadband, cond.center);
@@ -920,7 +921,7 @@ static int t300rs_upload_ramp(struct t300rs_device_entry *t300rs,
 
 	ret = t300rs_send_int(t300rs);
 	if (ret)
-		hid_err(t300rs->hdev, "failed uploading ramp");
+		hid_err(t300rs->hdev, "failed uploading ramp\n");
 
 	return ret;
 }
@@ -950,8 +951,8 @@ static int t300rs_upload_condition(struct t300rs_device_entry *t300rs,
 	uint16_t duration, right_sat, left_sat, right_coeff, left_coeff, max_sat, offset;
 	int16_t right_deadband, left_deadband;
 
-	right_coeff = t300rs_calculate_coefficient(cond.right_coeff, effect.type);
-	left_coeff = t300rs_calculate_coefficient(cond.left_coeff, effect.type);
+	right_coeff = t300rs_calculate_coefficient(t300rs, cond.right_coeff, effect.type);
+	left_coeff = t300rs_calculate_coefficient(t300rs, cond.left_coeff, effect.type);
 
 	t300rs_calculate_deadband(&right_deadband, &left_deadband,
 		cond.deadband, cond.center);
@@ -1037,7 +1038,7 @@ static int t300rs_upload_periodic(struct t300rs_device_entry *t300rs,
 
 	ret = t300rs_send_int(t300rs);
 	if (ret)
-		hid_err(t300rs->hdev, "failed uploading periodic effect");
+		hid_err(t300rs->hdev, "failed uploading periodic effect\n");
 
 	return ret;
 }
@@ -1058,9 +1059,9 @@ int t300rs_update_effect(void *data, const struct tmff2_effect_state *state)
 		case FF_PERIODIC:
 			return t300rs_update_periodic(t300rs, state);
 		default:
-			hid_err(t300rs->hdev, "invalid effect type: %x",
+			hid_err(t300rs->hdev, "invalid effect type: %x\n",
 					state->effect.type);
-			return -1;
+			return -EINVAL;
 	}
 }
 
@@ -1080,45 +1081,52 @@ int t300rs_upload_effect(void *data, const struct tmff2_effect_state *state)
 		case FF_PERIODIC:
 			return t300rs_upload_periodic(t300rs, state);
 		default:
-			hid_err(t300rs->hdev, "invalid effect type: %x",
+			hid_err(t300rs->hdev, "invalid effect type: %x\n",
 					state->effect.type);
-			return -1;
+			return -EINVAL;
 	}
 }
 
 static int t300rs_switch_mode(void *data, uint16_t mode)
 {
 	struct t300rs_device_entry *t300rs = data;
+	int value, ret;
+
 	if (!t300rs)
 		return -ENODEV;
 
-	if(t300rs->mode == mode) /* already in specified mode */
+	if (t300rs->mode == mode) /* already in specified mode */
 		return 0;
 
-	if (mode == 0)
-		/* go to normal mode */
-		usb_control_msg(t300rs->usbdev,
-				usb_sndctrlpipe(t300rs->usbdev, 0),
-				83, 0x41, 5, 0, 0, 0,
-				USB_CTRL_SET_TIMEOUT
-				);
-	else if (mode == 1)
-		/* go to advanced mode */
-		usb_control_msg(t300rs->usbdev,
-				usb_sndctrlpipe(t300rs->usbdev, 0),
-				83, 0x41, 3, 0, 0, 0,
-				USB_CTRL_SET_TIMEOUT
-				);
-	else
+	switch (mode) {
+	case 0: /* go to normal mode */
+		value = 5;
+		break;
+	case 1: /* go to advanced mode */
+		value = 3;
+		break;
+	default:
 		hid_warn(t300rs->hdev, "mode %i not supported\n", mode);
+		return -EINVAL;
+	}
 
+	ret = usb_control_msg(t300rs->usbdev,
+			usb_sndctrlpipe(t300rs->usbdev, 0),
+			83, 0x41, value, 0, NULL, 0,
+			USB_CTRL_SET_TIMEOUT);
+	if (ret < 0) {
+		hid_err(t300rs->hdev, "failed switching to mode %i: %i\n", mode, ret);
+		return ret;
+	}
 
+	/* the wheel reconnects with a different product id after switching */
+	t300rs->mode = mode;
 	return 0;
 }
 
-static struct t300rs_alt_modes {
-	char *id;
-	char *label;
+static const struct t300rs_alt_modes {
+	const char *id;
+	const char *label;
 	uint16_t mode;
 } t300rs_modes[] = {
 	{"base", "T300RS base", 0},
@@ -1160,32 +1168,24 @@ static ssize_t t300rs_alt_mode_show(void *data, char *buf)
 static ssize_t t300rs_alt_mode_store(void *data, const char *buf, size_t count)
 {
 	struct t300rs_device_entry *t300rs = data;
-	int i, len, mode_len;
-	char *lbuf;
+	int i, ret;
+
 	if (!t300rs)
 		return -ENODEV;
 
 	if (t300rs->attachment != T300RS_F1_ATTACHMENT)
 		return count; /* don't do anything */
 
-	lbuf = kasprintf(GFP_KERNEL, "%s", buf);
-	if (!lbuf)
-		return -ENOMEM;
-
-	len = strlen(buf);
 	for (i = 0; i < ARRAY_SIZE(t300rs_modes); ++i) {
-		mode_len = strlen(t300rs_modes[i].id);
-		if (mode_len > len)
+		/* sysfs_streq() ignores a trailing newline */
+		if (!sysfs_streq(buf, t300rs_modes[i].id))
 			continue;
 
-		if (strncmp(lbuf, t300rs_modes[i].id, mode_len) == 0) {
-			t300rs_switch_mode(data, t300rs_modes[i].mode);
-			break;
-		}
+		ret = t300rs_switch_mode(data, t300rs_modes[i].mode);
+		return ret ? ret : count;
 	}
 
-	kfree(lbuf);
-	return count;
+	return -EINVAL;
 }
 
 int t300rs_set_autocenter(void *data, uint16_t value)
@@ -1270,7 +1270,7 @@ int t300rs_set_range(void *data, uint16_t value)
 	}
 
 	/* only remember the range if it actually was sent */
-	range = value;
+	WRITE_ONCE(t300rs->tmff2->range, value);
 	return 0;
 }
 
@@ -1462,6 +1462,7 @@ int t300rs_init_common(struct tmff2_device_entry *tmff2,
 		&hdev->report_enum[HID_OUTPUT_REPORT].report_list;
 	struct hid_report *report;
 
+	t300rs->tmff2 = tmff2;
 	t300rs->hdev = hdev;
 	t300rs->input_dev = tmff2->input_dev;
 	/* tmff2_probe() only accepts USB devices, so this cast is safe */

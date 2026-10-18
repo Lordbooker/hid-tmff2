@@ -227,15 +227,20 @@ static __u8 *tspc_wheel_fixup(struct hid_device *hdev, __u8 *rdesc,
 static ssize_t tspc_alt_mode_store(void *data, const char *buf, size_t count)
 {
 	struct t300rs_device_entry *tspc = data;
+	int ret;
+
 	if (!tspc)
 		return -ENODEV;
 
 	/* blindly trusting that this works for now */
-	usb_control_msg(tspc->usbdev,
+	ret = usb_control_msg(tspc->usbdev,
 			usb_sndctrlpipe(tspc->usbdev, 0),
-			83, 0x41, 0xb, 0, 0, 0,
-			USB_CTRL_SET_TIMEOUT
-		       );
+			83, 0x41, 0xb, 0, NULL, 0,
+			USB_CTRL_SET_TIMEOUT);
+	if (ret < 0) {
+		hid_err(tspc->hdev, "failed switching mode: %i\n", ret);
+		return ret;
+	}
 
 	return count;
 }
