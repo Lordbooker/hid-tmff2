@@ -1441,7 +1441,7 @@ static int t300rs_get_attachment(struct t300rs_device_entry *t300rs)
 	} else {
 		hid_err(t300rs->hdev,
 				"unknown packet type %hx, please contact a maintainer\n",
-				le16_to_cpu(response->type));
+				le16_to_cpu((__force __le16)response->type));
 		ret = -EINVAL;
 		goto out;
 	}

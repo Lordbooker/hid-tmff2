@@ -15,7 +15,7 @@ static inline bool hid_is_usb(struct hid_device *hdev)
 #endif
 
 
-int open_mode = 1;
+static int open_mode = 1;
 module_param(open_mode, int, 0660);
 MODULE_PARM_DESC(open_mode,
 		"Whether to send mode change commands on open/close");
