@@ -61,6 +61,8 @@ struct tmff2_device_entry {
 	int friction_level;
 	u16 range;
 	u16 gain;
+	/* gain set by the application through the ff core, scaled by gain */
+	u16 ff_gain;
 
 	/* fields relevant to each actual device (T300, T248...) */
 	void *data;

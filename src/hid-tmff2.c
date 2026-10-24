@@ -285,8 +285,11 @@ static ssize_t gain_store(struct device *dev,
 		return ret;
 
 	WRITE_ONCE(tmff2->gain, value);
-	if (tmff2->set_gain) /* if we can, update gain immediately */
-		tmff2->set_gain(tmff2->data, value);
+	/* if we can, update gain immediately, combined with the gain the
+	 * application set, just like tmff2_set_gain() does */
+	if (tmff2->set_gain)
+		tmff2->set_gain(tmff2->data,
+				tmff2_scale_gain(tmff2, READ_ONCE(tmff2->ff_gain)));
 
 	return count;
 }
@@ -359,6 +362,7 @@ static void tmff2_set_gain(struct input_dev *dev, uint16_t value)
 		return;
 	}
 
+	WRITE_ONCE(tmff2->ff_gain, value);
 	if (tmff2->set_gain(tmff2->data, tmff2_scale_gain(tmff2, value)))
 		hid_warn(tmff2->hdev, "unable to set gain\n");
 }
@@ -683,7 +687,8 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 	/* set defaults wherever possible */
 	if (tmff2->set_gain) {
 		ff->set_gain = tmff2_set_gain;
-		tmff2->set_gain(tmff2->data, tmff2->gain);
+		tmff2->set_gain(tmff2->data,
+				tmff2_scale_gain(tmff2, tmff2->ff_gain));
 	}
 
 	if (tmff2->set_autocenter)
@@ -742,6 +747,8 @@ static int tmff2_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	tmff2->friction_level = clamp(friction_level, 0, LEVEL_MAX);
 	tmff2->range = clamp(range, 0, U16_MAX);
 	tmff2->gain = gain;
+	/* until an application sets a gain, only the gain above applies */
+	tmff2->ff_gain = GAIN_MAX;
 
 	switch (tmff2->hdev->product) {
 		case TMT300RS_PS3_NORM_ID:
