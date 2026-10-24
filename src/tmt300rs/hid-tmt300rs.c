@@ -1168,32 +1168,24 @@ static ssize_t t300rs_alt_mode_show(void *data, char *buf)
 static ssize_t t300rs_alt_mode_store(void *data, const char *buf, size_t count)
 {
 	struct t300rs_device_entry *t300rs = data;
-	int i, len, mode_len;
-	char *lbuf;
+	int i, ret;
+
 	if (!t300rs)
 		return -ENODEV;
 
 	if (t300rs->attachment != T300RS_F1_ATTACHMENT)
 		return count; /* don't do anything */
 
-	lbuf = kasprintf(GFP_KERNEL, "%s", buf);
-	if (!lbuf)
-		return -ENOMEM;
-
-	len = strlen(buf);
 	for (i = 0; i < ARRAY_SIZE(t300rs_modes); ++i) {
-		mode_len = strlen(t300rs_modes[i].id);
-		if (mode_len > len)
+		/* sysfs_streq() ignores a trailing newline */
+		if (!sysfs_streq(buf, t300rs_modes[i].id))
 			continue;
 
-		if (strncmp(lbuf, t300rs_modes[i].id, mode_len) == 0) {
-			t300rs_switch_mode(data, t300rs_modes[i].mode);
-			break;
-		}
+		ret = t300rs_switch_mode(data, t300rs_modes[i].mode);
+		return ret ? ret : count;
 	}
 
-	kfree(lbuf);
-	return count;
+	return -EINVAL;
 }
 
 int t300rs_set_autocenter(void *data, uint16_t value)
