@@ -37,11 +37,6 @@ extern int alt_mode;
 #define PARAM_ALT_MODE		(1 << 4)
 #define PARAM_GAIN		(1 << 5)
 
-#undef fixp_sin16
-#define fixp_sin16(v) (((v % 360) > 180) ?\
-		-(fixp_sin32((v % 360) - 180) >> 16)\
-		: fixp_sin32(v) >> 16)
-
 struct tmff2_effect_state {
 	struct ff_effect effect;
 	struct ff_effect old;

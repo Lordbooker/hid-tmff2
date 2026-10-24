@@ -489,8 +489,6 @@ static int tmff2_play(struct input_dev *dev, int effect_id, int value)
 		return -ENODEV;
 
 	state = &tmff2->states[effect_id];
-	if (!state)
-		return 0;
 
 	spin_lock_irqsave(&tmff2->lock, lock_flags);
 	if (value > 0) {
@@ -623,7 +621,7 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 		goto err;
 
 
-	tmff2->states = kzalloc(sizeof(struct tmff2_effect_state) * tmff2->max_effects,
+	tmff2->states = kcalloc(tmff2->max_effects, sizeof(struct tmff2_effect_state),
 			GFP_KERNEL);
 
 	if (!tmff2->states) {
@@ -690,6 +688,7 @@ file_err:
 	input_ff_destroy(tmff2->input_dev);
 ff_err:
 	kfree(tmff2->states);
+	tmff2->states = NULL;
 err:
 	return ret;
 }
