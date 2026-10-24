@@ -302,6 +302,50 @@ static ssize_t gain_show(struct device *dev,
 }
 static DEVICE_ATTR_RW(gain);
 
+static struct attribute *tmff2_attrs[] = {
+	&dev_attr_gain.attr,
+	&dev_attr_alternate_modes.attr,
+	&dev_attr_range.attr,
+	&dev_attr_spring_level.attr,
+	&dev_attr_damper_level.attr,
+	&dev_attr_friction_level.attr,
+	NULL
+};
+
+/* only show the attributes the connected wheel actually supports */
+static umode_t tmff2_attr_is_visible(struct kobject *kobj,
+		struct attribute *attr, int n)
+{
+	struct device *dev = kobj_to_dev(kobj);
+	struct tmff2_device_entry *tmff2 = hid_get_drvdata(to_hid_device(dev));
+	unsigned long param;
+
+	if (!tmff2)
+		return 0;
+
+	if (attr == &dev_attr_gain.attr)
+		param = PARAM_GAIN;
+	else if (attr == &dev_attr_alternate_modes.attr)
+		param = PARAM_ALT_MODE;
+	else if (attr == &dev_attr_range.attr)
+		param = PARAM_RANGE;
+	else if (attr == &dev_attr_spring_level.attr)
+		param = PARAM_SPRING_LEVEL;
+	else if (attr == &dev_attr_damper_level.attr)
+		param = PARAM_DAMPER_LEVEL;
+	else if (attr == &dev_attr_friction_level.attr)
+		param = PARAM_FRICTION_LEVEL;
+	else
+		return 0;
+
+	return (tmff2->params & param) ? attr->mode : 0;
+}
+
+static const struct attribute_group tmff2_attr_group = {
+	.attrs = tmff2_attrs,
+	.is_visible = tmff2_attr_is_visible,
+};
+
 static void tmff2_set_gain(struct input_dev *dev, uint16_t value)
 {
 	struct tmff2_device_entry *tmff2 = tmff2_from_input(dev);
@@ -568,71 +612,6 @@ static void tmff2_close(struct input_dev *dev)
 	hid_err(tmff2->hdev, "no close callback set\n");
 }
 
-static int tmff2_create_files(struct tmff2_device_entry *tmff2)
-{
-	struct device *dev = &tmff2->hdev->dev;
-	int ret;
-
-
-	/* could use short circuiting but this is more explicit */
-	if (tmff2->params & PARAM_GAIN) {
-		if ((ret = device_create_file(dev, &dev_attr_gain))) {
-			hid_err(tmff2->hdev, "unable to create sysfs for gain\n");
-			goto gain_err;
-		}
-	}
-
-	if (tmff2->params & PARAM_ALT_MODE) {
-		if ((ret = device_create_file(dev, &dev_attr_alternate_modes))) {
-			hid_err(tmff2->hdev, "unable to create sysfs for alternate_modes\n");
-			goto alt_err;
-		}
-	}
-
-	if (tmff2->params & PARAM_RANGE) {
-		if ((ret = device_create_file(dev, &dev_attr_range))) {
-			hid_warn(tmff2->hdev, "unable to create sysfs for range\n");
-			goto range_err;
-		}
-	}
-
-	if (tmff2->params & PARAM_SPRING_LEVEL) {
-		if ((ret = device_create_file(dev, &dev_attr_spring_level))) {
-			hid_warn(tmff2->hdev, "unable to create sysfs for spring_level\n");
-			goto spring_err;
-		}
-	}
-
-	if (tmff2->params & PARAM_DAMPER_LEVEL) {
-		if ((ret = device_create_file(dev, &dev_attr_damper_level))) {
-			hid_warn(tmff2->hdev, "unable to create sysfs for damper_level\n");
-			goto damper_err;
-		}
-	}
-
-	if (tmff2->params & PARAM_FRICTION_LEVEL) {
-		if ((ret = device_create_file(dev, &dev_attr_friction_level))) {
-			hid_warn(tmff2->hdev, "unable to create sysfs for friction_level\n");
-			goto friction_err;
-		}
-	}
-
-	return 0;
-
-friction_err:
-	device_remove_file(dev, &dev_attr_damper_level);
-damper_err:
-	device_remove_file(dev, &dev_attr_spring_level);
-spring_err:
-	device_remove_file(dev, &dev_attr_range);
-range_err:
-	device_remove_file(dev, &dev_attr_alternate_modes);
-alt_err:
-	device_remove_file(dev, &dev_attr_gain);
-gain_err:
-	return ret;
-}
-
 static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 {
 	int ret, i;
@@ -702,9 +681,11 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 	if (tmff2->switch_mode)
 		tmff2->switch_mode(tmff2->data, alt_mode);
 
-	/* create files */
-	if ((ret = tmff2_create_files(tmff2)))
+	/* create sysfs files, which ones are visible depends on params */
+	if ((ret = sysfs_create_group(&tmff2->hdev->dev.kobj, &tmff2_attr_group))) {
+		hid_err(tmff2->hdev, "unable to create sysfs files\n");
 		goto file_err;
+	}
 
 	WRITE_ONCE(tmff2->allow_scheduling, 1);
 	return 0;
@@ -833,7 +814,6 @@ static const __u8 *tmff2_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 static void tmff2_remove(struct hid_device *hdev)
 {
 	struct tmff2_device_entry *tmff2 = tmff2_from_hdev(hdev);
-	struct device *dev;
 
 	if (!tmff2)
 		return;
@@ -845,24 +825,7 @@ static void tmff2_remove(struct hid_device *hdev)
 	WRITE_ONCE(tmff2->allow_scheduling, 0);
 	cancel_delayed_work_sync(&tmff2->work);
 
-	dev = &tmff2->hdev->dev;
-	if (tmff2->params & PARAM_FRICTION_LEVEL)
-		device_remove_file(dev, &dev_attr_friction_level);
-
-	if (tmff2->params & PARAM_DAMPER_LEVEL)
-		device_remove_file(dev, &dev_attr_damper_level);
-
-	if (tmff2->params & PARAM_SPRING_LEVEL)
-		device_remove_file(dev, &dev_attr_spring_level);
-
-	if (tmff2->params & PARAM_RANGE)
-		device_remove_file(dev, &dev_attr_range);
-
-	if (tmff2->params & PARAM_ALT_MODE)
-		device_remove_file(dev, &dev_attr_alternate_modes);
-
-	if (tmff2->params & PARAM_GAIN)
-		device_remove_file(dev, &dev_attr_gain);
+	sysfs_remove_group(&tmff2->hdev->dev.kobj, &tmff2_attr_group);
 
 	hid_hw_stop(hdev);
 	cancel_delayed_work_sync(&tmff2->work);
