@@ -49,18 +49,32 @@ static const signed short tm_common_effects[] = {
 
 static int tm_common_interrupts(struct t300rs_device_entry *wheel)
 {
-	u8 *send_buf = kmalloc(256, GFP_KERNEL);
 	struct usb_interface *usbif = to_usb_interface(wheel->hdev->dev.parent);
-	struct usb_host_endpoint *ep;
-	int ret, trans, b_ep, i;
+	struct usb_host_interface *alt = usbif->cur_altsetting;
+	struct usb_endpoint_descriptor *ep;
+	u8 *send_buf;
+	int ret = 0, trans, b_ep, i;
 
+	/* the setup data goes to the second endpoint of the interface, don't
+	 * trust the device to actually have one */
+	if (alt->desc.bNumEndpoints < 2) {
+		hid_err(wheel->hdev, "unexpected number of endpoints: %u\n",
+				alt->desc.bNumEndpoints);
+		return -ENODEV;
+	}
+
+	ep = &alt->endpoint[1].desc;
+	if (!usb_endpoint_dir_out(ep)) {
+		hid_err(wheel->hdev, "setup endpoint is not an OUT endpoint\n");
+		return -ENODEV;
+	}
+	b_ep = ep->bEndpointAddress;
+
+	send_buf = kmalloc(256, GFP_KERNEL);
 	if (!send_buf) {
 		hid_err(wheel->hdev, "failed allocating send buffer\n");
 		return -ENOMEM;
 	}
-
-	ep = &usbif->cur_altsetting->endpoint[1];
-	b_ep = ep->desc.bEndpointAddress;
 
 	for (i = 0; i < ARRAY_SIZE(setup_arr); ++i) {
 		memcpy(send_buf, setup_arr[i], setup_arr_sizes[i]);
@@ -72,7 +86,7 @@ static int tm_common_interrupts(struct t300rs_device_entry *wheel)
 				USB_CTRL_SET_TIMEOUT);
 
 		if (ret) {
-			hid_err(wheel->hdev, "setup data couldn't be sent\n");
+			hid_err(wheel->hdev, "setup data couldn't be sent: %i\n", ret);
 			goto err;
 		}
 	}
