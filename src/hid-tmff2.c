@@ -479,8 +479,10 @@ static void tmff2_work_handler(struct work_struct *w)
 
 
 		/* wait for each effect update to actually be sent out to avoid
-		 * filling up usb output queue */
-		hid_hw_wait(tmff2->hdev);
+		 * filling up usb output queue, nothing to wait for if nothing
+		 * was sent */
+		if (actions)
+			hid_hw_wait(tmff2->hdev);
 	}
 
 	if (max_count && READ_ONCE(tmff2->allow_scheduling))
