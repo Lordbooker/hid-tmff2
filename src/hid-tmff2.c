@@ -48,23 +48,24 @@ module_param_cb(timer_msecs, &timer_msecs_ops, &timer_msecs, 0660);
 MODULE_PARM_DESC(timer_msecs,
 		"Timer resolution in msecs (1-1000)");
 
-/* should these be removed and just rely on /sys? */
-int spring_level = 30;
+/* the following parameters are only defaults for newly connected wheels, each
+ * wheel keeps its own copy that can be changed through sysfs */
+static int spring_level = 30;
 module_param(spring_level, int, 0);
 MODULE_PARM_DESC(spring_level,
 		"Level of spring force (0-100), as per Oversteer standards");
 
-int damper_level = 30;
+static int damper_level = 30;
 module_param(damper_level, int, 0);
 MODULE_PARM_DESC(damper_level,
 		"Level of damper force (0-100), as per Oversteer standards");
 
-int friction_level = 30;
+static int friction_level = 30;
 module_param(friction_level, int, 0);
 MODULE_PARM_DESC(friction_level,
 		"Level of friction force (0-100), as per Oversteer standards");
 
-int range = 900;
+static int range = 900;
 module_param(range, int, 0);
 MODULE_PARM_DESC(range,
 		"Range of wheel, depends on the wheel. Invalid values are ignored");
@@ -75,14 +76,16 @@ MODULE_PARM_DESC(alt_mode,
 		"Alternate mode, eg. F1 mode");
 
 #define GAIN_MAX 65535
-u16 gain = 40000;
+static u16 gain = 40000;
 module_param(gain, ushort, 0);
 MODULE_PARM_DESC(gain,
 		"Level of gain (0-65535)");
 
-static u16 tmff2_scale_gain(u16 value)
+#define LEVEL_MAX 100
+
+static u16 tmff2_scale_gain(struct tmff2_device_entry *tmff2, u16 value)
 {
-	return DIV_ROUND_CLOSEST((u32)value * gain, GAIN_MAX);
+	return DIV_ROUND_CLOSEST((u32)value * READ_ONCE(tmff2->gain), GAIN_MAX);
 }
 
 static struct tmff2_device_entry *tmff2_from_hdev(struct hid_device *hdev)
@@ -107,8 +110,14 @@ static struct tmff2_device_entry *tmff2_from_input(struct input_dev *input_dev)
 	return tmff2_from_hdev(hdev);
 }
 
-static ssize_t spring_level_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
+static struct tmff2_device_entry *tmff2_from_dev(struct device *dev)
+{
+	return tmff2_from_hdev(to_hid_device(dev));
+}
+
+/* common parsing for the spring/damper/friction level attributes */
+static ssize_t tmff2_level_store(struct device *dev, int *level,
+		const char *buf, size_t count)
 {
 	unsigned int value;
 	int ret;
@@ -117,83 +126,89 @@ static ssize_t spring_level_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	if (value > 100) {
-		dev_info_ratelimited(dev, "value %u larger than max 100, clamping to 100\n", value);
-		value = 100;
+	if (value > LEVEL_MAX) {
+		dev_info_ratelimited(dev, "value %u larger than max %d, clamping to %d\n",
+				value, LEVEL_MAX, LEVEL_MAX);
+		value = LEVEL_MAX;
 	}
 
-	spring_level = value;
-
+	WRITE_ONCE(*level, value);
 	return count;
+}
+
+static ssize_t spring_level_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+
+	if (!tmff2)
+		return -ENODEV;
+
+	return tmff2_level_store(dev, &tmff2->spring_level, buf, count);
 }
 
 static ssize_t spring_level_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", spring_level);
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+
+	if (!tmff2)
+		return -ENODEV;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", READ_ONCE(tmff2->spring_level));
 }
 static DEVICE_ATTR_RW(spring_level);
 
 static ssize_t damper_level_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	unsigned int value;
-	int ret;
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
 
+	if (!tmff2)
+		return -ENODEV;
 
-	ret = kstrtouint(buf, 0, &value);
-	if (ret)
-		return ret;
-
-	if (value > 100) {
-		dev_info_ratelimited(dev, "value %u larger than max 100, clamping to 100\n", value);
-		value = 100;
-	}
-
-	damper_level = value;
-
-	return count;
+	return tmff2_level_store(dev, &tmff2->damper_level, buf, count);
 }
 
 static ssize_t damper_level_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", damper_level);
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+
+	if (!tmff2)
+		return -ENODEV;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", READ_ONCE(tmff2->damper_level));
 }
 static DEVICE_ATTR_RW(damper_level);
 
 static ssize_t friction_level_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	unsigned int value;
-	int ret;
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
 
+	if (!tmff2)
+		return -ENODEV;
 
-	ret = kstrtouint(buf, 0, &value);
-	if (ret)
-		return ret;
-
-	if (value > 100) {
-		dev_info_ratelimited(dev, "value %u larger than max 100, clamping to 100\n", value);
-		value = 100;
-	}
-
-	friction_level = value;
-
-	return count;
+	return tmff2_level_store(dev, &tmff2->friction_level, buf, count);
 }
 
 static ssize_t friction_level_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", friction_level);
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+
+	if (!tmff2)
+		return -ENODEV;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", READ_ONCE(tmff2->friction_level));
 }
 static DEVICE_ATTR_RW(friction_level);
 
 static ssize_t range_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	struct tmff2_device_entry *tmff2 = tmff2_from_hdev(to_hid_device(dev));
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
 	u16 value;
 	int ret;
 
@@ -215,14 +230,19 @@ static ssize_t range_store(struct device *dev,
 static ssize_t range_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", range);
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+
+	if (!tmff2)
+		return -ENODEV;
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", READ_ONCE(tmff2->range));
 }
 static DEVICE_ATTR_RW(range);
 
 static ssize_t alternate_modes_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	struct tmff2_device_entry *tmff2 = tmff2_from_hdev(to_hid_device(dev));
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
 
 	if (!tmff2)
 		return -ENODEV;
@@ -237,7 +257,7 @@ static ssize_t alternate_modes_store(struct device *dev,
 static ssize_t alternate_modes_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct tmff2_device_entry *tmff2 = tmff2_from_hdev(to_hid_device(dev));
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
 
 	if (!tmff2)
 		return -ENODEV;
@@ -252,7 +272,7 @@ static DEVICE_ATTR_RW(alternate_modes);
 static ssize_t gain_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	struct tmff2_device_entry *tmff2 = tmff2_from_hdev(to_hid_device(dev));
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
 	u16 value;
 	int ret;
 
@@ -263,9 +283,9 @@ static ssize_t gain_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	gain = value;
+	WRITE_ONCE(tmff2->gain, value);
 	if (tmff2->set_gain) /* if we can, update gain immediately */
-		tmff2->set_gain(tmff2->data, gain);
+		tmff2->set_gain(tmff2->data, value);
 
 	return count;
 }
@@ -273,7 +293,12 @@ static ssize_t gain_store(struct device *dev,
 static ssize_t gain_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "%u\n", gain);
+	struct tmff2_device_entry *tmff2 = tmff2_from_dev(dev);
+
+	if (!tmff2)
+		return -ENODEV;
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", READ_ONCE(tmff2->gain));
 }
 static DEVICE_ATTR_RW(gain);
 
@@ -289,7 +314,7 @@ static void tmff2_set_gain(struct input_dev *dev, uint16_t value)
 		return;
 	}
 
-	if (tmff2->set_gain(tmff2->data, tmff2_scale_gain(value)))
+	if (tmff2->set_gain(tmff2->data, tmff2_scale_gain(tmff2, value)))
 		hid_warn(tmff2->hdev, "unable to set gain\n");
 }
 
@@ -665,14 +690,14 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 	/* set defaults wherever possible */
 	if (tmff2->set_gain) {
 		ff->set_gain = tmff2_set_gain;
-		tmff2->set_gain(tmff2->data, gain);
+		tmff2->set_gain(tmff2->data, tmff2->gain);
 	}
 
 	if (tmff2->set_autocenter)
 		ff->set_autocenter = tmff2_set_autocenter;
 
 	if (tmff2->set_range)
-		tmff2->set_range(tmff2->data, range);
+		tmff2->set_range(tmff2->data, tmff2->range);
 
 	if (tmff2->switch_mode)
 		tmff2->switch_mode(tmff2->data, alt_mode);
@@ -712,6 +737,13 @@ static int tmff2_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 	tmff2->hdev = hdev;
 	hid_set_drvdata(tmff2->hdev, tmff2);
+
+	/* per-device settings, initialized from the module parameters */
+	tmff2->spring_level = clamp(spring_level, 0, LEVEL_MAX);
+	tmff2->damper_level = clamp(damper_level, 0, LEVEL_MAX);
+	tmff2->friction_level = clamp(friction_level, 0, LEVEL_MAX);
+	tmff2->range = clamp(range, 0, U16_MAX);
+	tmff2->gain = gain;
 
 	switch (tmff2->hdev->product) {
 		case TMT300RS_PS3_NORM_ID:

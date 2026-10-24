@@ -7,11 +7,6 @@
 #include <linux/ktime.h>
 #include <linux/input.h>
 
-extern int spring_level;
-extern int damper_level;
-extern int friction_level;
-extern int range;
-extern u16 gain;
 extern int alt_mode;
 
 #define USB_VENDOR_ID_THRUSTMASTER 0x044f
@@ -61,6 +56,13 @@ struct tmff2_device_entry {
 	spinlock_t lock;
 
 	int allow_scheduling;
+
+	/* per-device settings, changeable through sysfs */
+	int spring_level;
+	int damper_level;
+	int friction_level;
+	u16 range;
+	u16 gain;
 
 	/* fields relevant to each actual device (T300, T248...) */
 	void *data;
@@ -125,6 +127,7 @@ struct t300rs_device_entry {
 	struct hid_report *report;
 	struct hid_field *ff_field;
 	struct usb_device *usbdev;
+	struct tmff2_device_entry *tmff2;
 
 	int (*open)(struct input_dev *dev);
 	void (*close)(struct input_dev *dev);

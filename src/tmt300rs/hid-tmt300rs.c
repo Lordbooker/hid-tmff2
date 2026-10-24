@@ -403,20 +403,21 @@ static uint8_t t300rs_condition_effect_type(uint16_t effect_type)
 	return 0x07;
 }
 
-static int16_t t300rs_calculate_coefficient(int16_t coeff, uint16_t effect_type)
+static int16_t t300rs_calculate_coefficient(struct t300rs_device_entry *t300rs,
+		int16_t coeff, uint16_t effect_type)
 {
-	uint8_t input_level;
+	int input_level;
 
 	switch (effect_type)
 	{
 	case FF_SPRING:
-		input_level = spring_level;
+		input_level = READ_ONCE(t300rs->tmff2->spring_level);
 		break;
 	case FF_DAMPER:
-		input_level = damper_level;
+		input_level = READ_ONCE(t300rs->tmff2->damper_level);
 		break;
 	case FF_FRICTION:
-		input_level = friction_level;
+		input_level = READ_ONCE(t300rs->tmff2->friction_level);
 		break;
 	default:
 		input_level = 100;
@@ -729,11 +730,11 @@ static int t300rs_update_condition(struct t300rs_device_entry *t300rs,
 	uint16_t right_coeff, right_coeff_old, left_coeff, left_coeff_old;
 	int16_t right_deadband, right_deadband_old, left_deadband, left_deadband_old;
 
-	right_coeff = t300rs_calculate_coefficient(cond.right_coeff, effect.type);
-	right_coeff_old = t300rs_calculate_coefficient(cond_old.right_coeff, old.type);
+	right_coeff = t300rs_calculate_coefficient(t300rs, cond.right_coeff, effect.type);
+	right_coeff_old = t300rs_calculate_coefficient(t300rs, cond_old.right_coeff, old.type);
 
-	left_coeff = t300rs_calculate_coefficient(cond.left_coeff, effect.type);
-	left_coeff_old = t300rs_calculate_coefficient(cond_old.left_coeff, old.type);
+	left_coeff = t300rs_calculate_coefficient(t300rs, cond.left_coeff, effect.type);
+	left_coeff_old = t300rs_calculate_coefficient(t300rs, cond_old.left_coeff, old.type);
 
 	t300rs_calculate_deadband(&right_deadband, &left_deadband,
 		cond.deadband, cond.center);
@@ -950,8 +951,8 @@ static int t300rs_upload_condition(struct t300rs_device_entry *t300rs,
 	uint16_t duration, right_sat, left_sat, right_coeff, left_coeff, max_sat, offset;
 	int16_t right_deadband, left_deadband;
 
-	right_coeff = t300rs_calculate_coefficient(cond.right_coeff, effect.type);
-	left_coeff = t300rs_calculate_coefficient(cond.left_coeff, effect.type);
+	right_coeff = t300rs_calculate_coefficient(t300rs, cond.right_coeff, effect.type);
+	left_coeff = t300rs_calculate_coefficient(t300rs, cond.left_coeff, effect.type);
 
 	t300rs_calculate_deadband(&right_deadband, &left_deadband,
 		cond.deadband, cond.center);
@@ -1274,7 +1275,7 @@ int t300rs_set_range(void *data, uint16_t value)
 	}
 
 	/* only remember the range if it actually was sent */
-	range = value;
+	WRITE_ONCE(t300rs->tmff2->range, value);
 	return 0;
 }
 
@@ -1466,6 +1467,7 @@ int t300rs_init_common(struct tmff2_device_entry *tmff2,
 		&hdev->report_enum[HID_OUTPUT_REPORT].report_list;
 	struct hid_report *report;
 
+	t300rs->tmff2 = tmff2;
 	t300rs->hdev = hdev;
 	t300rs->input_dev = tmff2->input_dev;
 	/* tmff2_probe() only accepts USB devices, so this cast is safe */
