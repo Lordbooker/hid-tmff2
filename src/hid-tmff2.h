@@ -142,6 +142,9 @@ struct t300rs_device_entry {
 	int mode;
 	int attachment;
 	u8 buffer_length;
+
+	/* only used for effect packets, which are exclusively built from the
+	 * tmff2 work handler. Other commands use their own buffers. */
 	u8 *send_buffer;
 
 	/* serializes access to ff_field and the output report */

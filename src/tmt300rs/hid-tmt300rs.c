@@ -1194,33 +1194,31 @@ int t300rs_set_autocenter(void *data, uint16_t value)
 	struct __packed t300rs_packet_autocenter {
 		struct t300rs_setup_header header;
 		uint16_t value;
-	} *autocenter_packet;
+	} autocenter_packet = { 0 };
 	int ret;
 
 	if (!t300rs)
 		return -ENODEV;
 
-	/* TODO: this should probably also use a separately allocated buffer?
-	 * someone might change autocentering while we're updating the buffer
-	 * which would cause corruption */
-	autocenter_packet = (struct t300rs_packet_autocenter *)t300rs->send_buffer;
+	/* called from atomic context by the ff core, so this uses its own
+	 * buffer on the stack instead of t300rs->send_buffer */
+	autocenter_packet.header.cmd = 0x08;
+	autocenter_packet.header.code = 0x04;
+	autocenter_packet.value = cpu_to_le16(0x01);
 
-	autocenter_packet->header.cmd = 0x08;
-	autocenter_packet->header.code = 0x04;
-	autocenter_packet->value = cpu_to_le16(0x01);
-
-	if ((ret = t300rs_send_int(t300rs))) {
-		hid_err(t300rs->hdev, "failed setting autocenter");
+	if ((ret = t300rs_send_buf(t300rs, (u8 *)&autocenter_packet,
+					sizeof(autocenter_packet)))) {
+		hid_err(t300rs->hdev, "failed setting autocenter\n");
 		return ret;
 	}
 
-	autocenter_packet->header.cmd = 0x08;
-	autocenter_packet->header.code = 0x03;
+	autocenter_packet.header.cmd = 0x08;
+	autocenter_packet.header.code = 0x03;
+	autocenter_packet.value = cpu_to_le16(value);
 
-	autocenter_packet->value = cpu_to_le16(value);
-
-	if ((ret = t300rs_send_int(t300rs)))
-		hid_err(t300rs->hdev, "failed setting autocenter");
+	if ((ret = t300rs_send_buf(t300rs, (u8 *)&autocenter_packet,
+					sizeof(autocenter_packet))))
+		hid_err(t300rs->hdev, "failed setting autocenter\n");
 
 	return ret;
 }
@@ -1228,19 +1226,18 @@ int t300rs_set_autocenter(void *data, uint16_t value)
 int t300rs_set_gain(void *data, uint16_t gain)
 {
 	struct t300rs_device_entry *t300rs = data;
-	struct __packed t300rs_packet_gain {
-		struct t300rs_setup_header header;
-	} *gain_packet;
+	struct t300rs_setup_header gain_packet;
 	int ret;
 
 	if (!t300rs)
 		return -ENODEV;
 
-	gain_packet = (struct t300rs_packet_gain *)t300rs->send_buffer;
-	gain_packet->header.cmd = 0x02;
-	gain_packet->header.code = (gain >> 8) & 0xff;
+	/* called from atomic context by the ff core, so this uses its own
+	 * buffer on the stack instead of t300rs->send_buffer */
+	gain_packet.cmd = 0x02;
+	gain_packet.code = (gain >> 8) & 0xff;
 
-	if ((ret = t300rs_send_int(t300rs)))
+	if ((ret = t300rs_send_buf(t300rs, (u8 *)&gain_packet, sizeof(gain_packet))))
 		hid_err(t300rs->hdev, "failed setting gain: %i\n", ret);
 
 	return ret;
@@ -1290,27 +1287,22 @@ err:
 
 static int t300rs_send_open(struct t300rs_device_entry *t300rs)
 {
-	struct __packed t300rs_packet_open {
-		struct t300rs_setup_header header;
-	} *open_packet;
+	const struct t300rs_setup_header open_packet = {
+		.cmd = 0x01,
+		.code = 0x05,
+	};
 
-	open_packet = (struct t300rs_packet_open *)t300rs->send_buffer;
-	open_packet->header.cmd = 0x01;
-	open_packet->header.code = 0x05;
-
-	return t300rs_send_int(t300rs);
+	return t300rs_send_buf(t300rs, (const u8 *)&open_packet, sizeof(open_packet));
 }
 
 static int t300rs_send_close(struct t300rs_device_entry *t300rs)
 {
-	struct __packed t300rs_packet_open {
-		struct t300rs_setup_header header;
-	} *open_packet;
+	const struct t300rs_setup_header close_packet = {
+		.cmd = 0x01,
+		.code = 0x00,
+	};
 
-	open_packet = (struct t300rs_packet_open *)t300rs->send_buffer;
-	open_packet->header.cmd = 0x01;
-
-	return t300rs_send_int(t300rs);
+	return t300rs_send_buf(t300rs, (const u8 *)&close_packet, sizeof(close_packet));
 }
 
 int t300rs_open(void *data, int open_mode)

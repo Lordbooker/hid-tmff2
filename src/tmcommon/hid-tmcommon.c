@@ -124,18 +124,14 @@ static int tm_common_set_range(void *data, uint16_t value)
 
 static int tm_common_send_open(struct t300rs_device_entry *wheel)
 {
-	int r1, r2;
-	wheel->send_buffer[0] = 0x01;
-	wheel->send_buffer[1] = 0x04;
-	if ((r1 = t300rs_send_int(wheel)))
-		return r1;
+	static const u8 open_0[] = { 0x01, 0x04 };
+	static const u8 open_1[] = { 0x01, 0x05 };
+	int ret;
 
-	wheel->send_buffer[0] = 0x01;
-	wheel->send_buffer[1] = 0x05;
-	if ((r2 = t300rs_send_int(wheel)))
-		return r2;
+	if ((ret = t300rs_send_buf(wheel, open_0, sizeof(open_0))))
+		return ret;
 
-	return 0;
+	return t300rs_send_buf(wheel, open_1, sizeof(open_1));
 }
 
 static int tm_common_open(void *data, int open_mode)
@@ -153,18 +149,14 @@ static int tm_common_open(void *data, int open_mode)
 
 static int tm_common_send_close(struct t300rs_device_entry *wheel)
 {
-	int r1, r2;
-	wheel->send_buffer[0] = 0x01;
-	wheel->send_buffer[1] = 0x05;
-	if ((r1 = t300rs_send_int(wheel)))
-		return r1;
+	static const u8 close_0[] = { 0x01, 0x05 };
+	static const u8 close_1[] = { 0x01, 0x00 };
+	int ret;
 
-	wheel->send_buffer[0] = 0x01;
-	wheel->send_buffer[1] = 0x00;
-	if ((r2 = t300rs_send_int(wheel)))
-		return r2;
+	if ((ret = t300rs_send_buf(wheel, close_0, sizeof(close_0))))
+		return ret;
 
-	return 0;
+	return t300rs_send_buf(wheel, close_1, sizeof(close_1));
 }
 
 static int tm_common_close(void *data, int open_mode)
