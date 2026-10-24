@@ -567,6 +567,9 @@ static int tmff2_play(struct input_dev *dev, int effect_id, int value)
 		__set_bit(FF_EFFECT_QUEUE_START, &state->flags);
 		__clear_bit(FF_EFFECT_QUEUE_STOP, &state->flags);
 	} else {
+		/* a stopped effect doesn't need the work handler anymore, which
+		 * keeps rescheduling itself as long as any count is set */
+		state->count = 0;
 		__set_bit(FF_EFFECT_QUEUE_STOP, &state->flags);
 		__clear_bit(FF_EFFECT_QUEUE_START, &state->flags);
 	}
