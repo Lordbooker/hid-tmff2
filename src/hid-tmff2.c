@@ -19,10 +19,34 @@ module_param(open_mode, int, 0660);
 MODULE_PARM_DESC(open_mode,
 		"Whether to send mode change commands on open/close");
 
-int timer_msecs = DEFAULT_TIMER_PERIOD;
-module_param(timer_msecs, int, 0660);
+#define TIMER_MSECS_MIN 1
+#define TIMER_MSECS_MAX 1000
+static int timer_msecs = DEFAULT_TIMER_PERIOD;
+
+/* timer_msecs is writable at runtime, so reject values that would make the
+ * work handler spin (0) or end up with nonsensical delays (negative) */
+static int timer_msecs_set(const char *val, const struct kernel_param *kp)
+{
+	int value, ret;
+
+	ret = kstrtoint(val, 0, &value);
+	if (ret)
+		return ret;
+
+	if (value < TIMER_MSECS_MIN || value > TIMER_MSECS_MAX)
+		return -EINVAL;
+
+	WRITE_ONCE(*(int *)kp->arg, value);
+	return 0;
+}
+
+static const struct kernel_param_ops timer_msecs_ops = {
+	.set = timer_msecs_set,
+	.get = param_get_int,
+};
+module_param_cb(timer_msecs, &timer_msecs_ops, &timer_msecs, 0660);
 MODULE_PARM_DESC(timer_msecs,
-		"Timer resolution in msecs");
+		"Timer resolution in msecs (1-1000)");
 
 /* should these be removed and just rely on /sys? */
 int spring_level = 30;
@@ -388,7 +412,8 @@ static void tmff2_work_handler(struct work_struct *w)
 	}
 
 	if (max_count && READ_ONCE(tmff2->allow_scheduling))
-		schedule_delayed_work(&tmff2->work, msecs_to_jiffies(timer_msecs));
+		schedule_delayed_work(&tmff2->work,
+				msecs_to_jiffies(READ_ONCE(timer_msecs)));
 }
 
 static void tmff2_rewrite_rumble(struct ff_effect *effect)

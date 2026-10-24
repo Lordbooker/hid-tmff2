@@ -7,7 +7,6 @@
 #include <linux/ktime.h>
 #include <linux/input.h>
 
-extern int timer_msecs;
 extern int spring_level;
 extern int damper_level;
 extern int friction_level;
