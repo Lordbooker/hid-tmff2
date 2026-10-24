@@ -170,13 +170,13 @@ static ssize_t range_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct tmff2_device_entry *tmff2 = tmff2_from_hdev(to_hid_device(dev));
-	unsigned int value;
+	u16 value;
 	int ret;
 
 	if (!tmff2)
 		return -ENODEV;
 
-	if ((ret = kstrtouint(buf, 0, &value)))
+	if ((ret = kstrtou16(buf, 0, &value)))
 		return ret;
 
 	if (tmff2->set_range) {
