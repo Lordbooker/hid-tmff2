@@ -115,9 +115,9 @@ static const u8 t300rs_rdesc_nrm_fixed[] = {
 	0x75, 0x01, /* Report size (1) */
 	0x95, 0x0d, /* Report count (13) */
 	0x81, 0x02, /* Input (Variable, Absolute) */
-	0x75, 0x0b, /* Report size (13) */
+	0x75, 0x0b, /* Report size (11) */
 	0x95, 0x01, /* Report count (1) */
-	0x81, 0x03, /* Usage (Variable, Absolute, Constant) */
+	0x81, 0x03, /* Input (Variable, Absolute, Constant) */
 	0x05, 0x01, /* Usage page (Generic Desktop) */
 	0x09, 0x39, /* Usage (Hat Switch) */
 	0x25, 0x07, /* Logical maximum (7) */
@@ -201,7 +201,7 @@ static const u8 t300rs_rdesc_adv_fixed[] = {
 	0x46, 0xff, 0x00, /* Physical maximum (255) */
 	0x91, 0x02, /* Output (Variable, Absolute) */
 	0x85, 0x02, /* Report ID (2) */
-	0x09, 0x02, /* Usage (Mouse) */
+	0x09, 0x02, /* Usage (2) */
 	0x81, 0x02, /* Input (Variable, Absolute) */
 	0x09, 0x14, /* Usage (20) */
 	0x85, 0x14, /* Report ID (20) */
@@ -233,14 +233,14 @@ static const u8 t300rs_rdesc_ps4_fixed[] = {
 	0x75, 0x04, /* Report size (4) */
 	0x95, 0x01, /* Report count (1) */
 	0x81, 0x42, /* Input (Variable, Absolute, NullState) */
-	0x65, 0x00, /* Input (None) */
+	0x65, 0x00, /* Unit (None) */
 	0x05, 0x09, /* Usage page (Button) */
 	0x19, 0x01, /* Usage minimum (1) */
 	0x29, 0x0e, /* Usage maximum (14) */
 	0x15, 0x00, /* Logical minimum (0) */
 	0x25, 0x01, /* Logical maximum (1) */
 	0x75, 0x01, /* Report size (1) */
-	0x95, 0x0e, /* Report size (14) */
+	0x95, 0x0e, /* Report count (14) */
 	0x81, 0x02, /* Input (Variable, Absolute) */
 	0x06, 0x00, 0xff, /* Usage page (Vendor 1) */
 	0x09, 0x20, /* Usage (32) */
@@ -255,7 +255,7 @@ static const u8 t300rs_rdesc_ps4_fixed[] = {
 	0x75, 0x08, /* Report size (8) */
 	0x95, 0x02, /* Report count (2) */
 	0x81, 0x02, /* Input (Variable, Absolute) */
-	0x05, 0x01, /* Usage page (Vendor 1) */
+	0x05, 0x01, /* Usage page (Generic Desktop) */
 	/* constant zero? */
 	0x09, 0x00, /* Usage (33) */
 	0x95, 0x21, /* Report count (33) */
@@ -282,7 +282,7 @@ static const u8 t300rs_rdesc_ps4_fixed[] = {
 	0x05, 0x09, /* Usage page (Button) */
 	0x19, 0x0f, /* Usage minimum (15) */
 	0x29, 0x17, /* Usage maximum (23) */
-	0x15, 0x00, /* Logical minimum (1) */
+	0x15, 0x00, /* Logical minimum (0) */
 	0x25, 0x01, /* Logical maximum (1) */
 	0x75, 0x01, /* Report size (1) */
 	0x95, 0x08, /* Report count (8) */
@@ -295,8 +295,8 @@ static const u8 t300rs_rdesc_ps4_fixed[] = {
 	0x81, 0x02, /* Input (Variable, Absolute) */
 	/* continue unmodified */
 	0x06, 0x00, 0xff, /* Usage page (Vendor defined 1) */
-	0x85, 0x60, /* Report ID (5) (change to 0x60?) */
-	0x09, 0x60, /* Usage (34) (change to 0x60?) */
+	0x85, 0x60, /* Report ID (96), prev 5 */
+	0x09, 0x60, /* Usage (96), prev 34 */
 	0x95, 0x1f, /* Report count (31) () */
 	0x91, 0x02, /* Output (Variable, Absolute) */
 	0x85, 0x03, /* Report ID (3) */
