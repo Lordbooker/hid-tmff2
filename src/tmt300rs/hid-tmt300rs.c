@@ -921,7 +921,7 @@ static int t300rs_upload_ramp(struct t300rs_device_entry *t300rs,
 
 	ret = t300rs_send_int(t300rs);
 	if (ret)
-		hid_err(t300rs->hdev, "failed uploading ramp");
+		hid_err(t300rs->hdev, "failed uploading ramp\n");
 
 	return ret;
 }
@@ -1038,7 +1038,7 @@ static int t300rs_upload_periodic(struct t300rs_device_entry *t300rs,
 
 	ret = t300rs_send_int(t300rs);
 	if (ret)
-		hid_err(t300rs->hdev, "failed uploading periodic effect");
+		hid_err(t300rs->hdev, "failed uploading periodic effect\n");
 
 	return ret;
 }
@@ -1059,9 +1059,9 @@ int t300rs_update_effect(void *data, const struct tmff2_effect_state *state)
 		case FF_PERIODIC:
 			return t300rs_update_periodic(t300rs, state);
 		default:
-			hid_err(t300rs->hdev, "invalid effect type: %x",
+			hid_err(t300rs->hdev, "invalid effect type: %x\n",
 					state->effect.type);
-			return -1;
+			return -EINVAL;
 	}
 }
 
@@ -1081,9 +1081,9 @@ int t300rs_upload_effect(void *data, const struct tmff2_effect_state *state)
 		case FF_PERIODIC:
 			return t300rs_upload_periodic(t300rs, state);
 		default:
-			hid_err(t300rs->hdev, "invalid effect type: %x",
+			hid_err(t300rs->hdev, "invalid effect type: %x\n",
 					state->effect.type);
-			return -1;
+			return -EINVAL;
 	}
 }
 
