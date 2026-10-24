@@ -98,7 +98,7 @@ struct tmff2_device_entry {
 	ssize_t (*alt_mode_show)(void *data, char *buf);
 	ssize_t (*alt_mode_store)(void *data, const char *buf, size_t count);
 	int (*set_autocenter)(void *data, uint16_t autocenter);
-	__u8 *(*wheel_fixup)(struct hid_device *hdev, __u8 *rdesc, unsigned int *rsize);
+	const __u8 *(*wheel_fixup)(struct hid_device *hdev, __u8 *rdesc, unsigned int *rsize);
 
 	/* void pointers are dangerous, I know, but in this case likely the
 	 * best option... */
@@ -172,7 +172,7 @@ int t300rs_init_common(struct tmff2_device_entry *tmff2,
 /* description of a wheel handled by the shared tmcommon backend */
 struct tm_wheel_desc {
 	const char *name;
-	__u8 *rdesc;
+	const __u8 *rdesc;
 	unsigned int rsize;
 	u16 range_min;
 	u16 range_max;

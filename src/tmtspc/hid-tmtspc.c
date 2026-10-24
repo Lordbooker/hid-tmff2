@@ -4,7 +4,7 @@
 #include "../hid-tmff2.h"
 
 /* TODO: sort through this stuff */
-static u8 tspc_pc_rdesc_fixed[] = {
+static const u8 tspc_pc_rdesc_fixed[] = {
 	0x05, 0x01, /* Usage page (Generic Desktop) */
 	0x09, 0x04, /* Usage (Joystick) */
 	0xa1, 0x01, /* Collection (Application) */

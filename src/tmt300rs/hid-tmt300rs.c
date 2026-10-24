@@ -83,7 +83,7 @@ struct t300rs_data {
 	void *device_props;
 };
 
-static u8 t300rs_rdesc_nrm_fixed[] = {
+static const u8 t300rs_rdesc_nrm_fixed[] = {
 	0x05, 0x01, /* Usage page (Generic Desktop) */
 	0x09, 0x04, /* Usage (Joystick) */
 	0xa1, 0x01, /* Collection (Application) */
@@ -148,7 +148,7 @@ static u8 t300rs_rdesc_nrm_fixed[] = {
 	0xc0, /* End collection */
 };
 
-static u8 t300rs_rdesc_adv_fixed[] = {
+static const u8 t300rs_rdesc_adv_fixed[] = {
 	0x05, 0x01, /* Usage page (Generic Desktop) */
 	0x09, 0x04, /* Usage (Joystick) */
 	0xa1, 0x01, /* Collection (Application) */
@@ -210,7 +210,7 @@ static u8 t300rs_rdesc_adv_fixed[] = {
 	0xc0, /* End collection */
 };
 
-static u8 t300rs_rdesc_ps4_fixed[] = {
+static const u8 t300rs_rdesc_ps4_fixed[] = {
 	0x05, 0x01, /* Usage page (Generic Desktop) */
 	0x09, 0x05, /* Usage (GamePad) */
 	0xa1, 0x01, /* Collection (Application) */
@@ -1548,27 +1548,24 @@ static int t300rs_wheel_destroy(void *data)
 	return 0;
 }
 
-static __u8 *t300rs_wheel_fixup(struct hid_device *hdev, __u8 *rdesc,
+static const __u8 *t300rs_wheel_fixup(struct hid_device *hdev, __u8 *rdesc,
 		unsigned int *rsize)
 {
 	switch (hdev->product) {
 		case TMT300RS_PS3_NORM_ID:
 		/* normal PS3 mode */
-		rdesc = t300rs_rdesc_nrm_fixed;
 		*rsize = sizeof(t300rs_rdesc_nrm_fixed);
-		break;
+		return t300rs_rdesc_nrm_fixed;
 
 		case TMT300RS_PS4_NORM_ID:
 		/* PS4 normal mode */
-		rdesc = t300rs_rdesc_ps4_fixed;
 		*rsize = sizeof(t300rs_rdesc_ps4_fixed);
-		break;
+		return t300rs_rdesc_ps4_fixed;
 
 		case TMT300RS_PS3_ADV_ID:
 		/* PS3 advanced mode */
-		rdesc = t300rs_rdesc_adv_fixed;
 		*rsize = sizeof(t300rs_rdesc_adv_fixed);
-		break;
+		return t300rs_rdesc_adv_fixed;
 	}
 
 	return rdesc;

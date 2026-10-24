@@ -839,8 +839,10 @@ static const __u8 *tmff2_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 	if (!tmff2) /* not entirely sure what the best course of action would be here */
 		return rdesc;
 
+	/* hid-core copies the returned descriptor and never writes to it, so
+	 * casting away const for kernels before 6.12 is fine */
 	if (tmff2->wheel_fixup)
-		return tmff2->wheel_fixup(hdev, rdesc, rsize);
+		return (__u8 *)tmff2->wheel_fixup(hdev, rdesc, rsize);
 
 	return rdesc;
 }

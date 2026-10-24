@@ -212,7 +212,7 @@ wheel_err:
 	return ret;
 }
 
-static __u8 *tm_common_wheel_fixup(struct hid_device *hdev, __u8 *rdesc,
+static const __u8 *tm_common_wheel_fixup(struct hid_device *hdev, __u8 *rdesc,
 		unsigned int *rsize)
 {
 	/* the driver data is set before hid_parse() calls the fixup */
