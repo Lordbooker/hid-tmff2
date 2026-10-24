@@ -19,7 +19,21 @@ if [ -z "${TM_VER}" ]; then
 	exit 1
 fi
 
+# the build needs the hid-tminit submodule
+if [ ! -f deps/hid-tminit/Makefile ]; then
+	echo "deps/hid-tminit is missing, clone with --recurse-submodules or run"
+	echo "git submodule update --init"
+	exit 1
+fi
+
 DST="/usr/src/${TM_NAME}-${TM_VER}"
+
+# a previous install of the same version makes 'dkms add' fail, and its
+# source tree may still contain files that were removed from the repository
+if [ -n "$(dkms status -m "${TM_NAME}" -v "${TM_VER}")" ]; then
+	dkms remove -m "${TM_NAME}" -v "${TM_VER}" --all || exit 1
+fi
+rm -rf "${DST}"
 
 mkdir -p "${DST}" || exit 1
 cp -r ./* "${DST}" || exit 1
