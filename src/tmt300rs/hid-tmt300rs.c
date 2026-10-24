@@ -1246,10 +1246,9 @@ int t300rs_set_gain(void *data, uint16_t gain)
 int t300rs_set_range(void *data, uint16_t value)
 {
 	struct t300rs_device_entry *t300rs = data;
-	/* it's important that we don't use t300rs->send_buffer, as range can be
-	 * set from outside of the FFB environment, and we don't want to
-	 * accidentally overwrite any data. */
-	u8 *send_buffer = kzalloc(t300rs->buffer_length, GFP_KERNEL);
+	/* range is set from sysfs, outside of the work handler, so don't use
+	 * t300rs->send_buffer */
+	u8 send_buffer[4];
 	uint16_t scaled_value;
 	int ret;
 
@@ -1263,26 +1262,20 @@ int t300rs_set_range(void *data, uint16_t value)
 		value = 1080;
 	}
 
-	if (!send_buffer) {
-		ret = -EINVAL;
-		hid_err(t300rs->hdev, "could not allocate send_buffer\n");
-		goto err;
-	}
-
 	scaled_value = value * 0x3c;
 	send_buffer[0] = 0x08;
 	send_buffer[1] = 0x11;
 	send_buffer[2] = scaled_value & 0xff;
 	send_buffer[3] = scaled_value >> 8;
 
-	if ((ret = t300rs_send_buf(t300rs, send_buffer, t300rs->buffer_length)))
+	if ((ret = t300rs_send_buf(t300rs, send_buffer, sizeof(send_buffer)))) {
 		hid_warn(t300rs->hdev, "failed setting range\n");
+		return ret;
+	}
 
-	/* since everythin went OK, update the current range */
+	/* only remember the range if it actually was sent */
 	range = value;
-err:
-	kfree(send_buffer);
-	return ret;
+	return 0;
 }
 
 static int t300rs_send_open(struct t300rs_device_entry *t300rs)
