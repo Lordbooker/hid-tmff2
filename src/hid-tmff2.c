@@ -179,10 +179,11 @@ static ssize_t range_store(struct device *dev,
 	if ((ret = kstrtou16(buf, 0, &value)))
 		return ret;
 
-	if (tmff2->set_range) {
-		if ((ret = tmff2->set_range(tmff2->data, value)))
-			return ret;
-	}
+	if (!tmff2->set_range)
+		return -EOPNOTSUPP;
+
+	if ((ret = tmff2->set_range(tmff2->data, value)))
+		return ret;
 
 	return count;
 }
@@ -202,10 +203,11 @@ static ssize_t alternate_modes_store(struct device *dev,
 	if (!tmff2)
 		return -ENODEV;
 
-	if (tmff2->alt_mode_store)
-		return tmff2->alt_mode_store(tmff2->data, buf, count);
+	/* returning 0 from a store makes some userspace tools retry forever */
+	if (!tmff2->alt_mode_store)
+		return -EOPNOTSUPP;
 
-	return 0;
+	return tmff2->alt_mode_store(tmff2->data, buf, count);
 }
 
 static ssize_t alternate_modes_show(struct device *dev,
