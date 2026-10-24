@@ -58,28 +58,25 @@ struct __packed t300rs_setup_header {
 };
 
 struct __packed t300rs_packet_envelope {
-	uint16_t attack_length;
-	uint16_t attack_level;
-	uint16_t fade_length;
-	uint16_t fade_level;
+	__le16 attack_length;
+	__le16 attack_level;
+	__le16 fade_length;
+	__le16 fade_level;
 };
 
 struct __packed t300rs_packet_timing {
 	uint8_t start_marker;
-	uint16_t duration;
+	__le16 duration;
 	uint8_t zero1[2];
-	uint16_t offset;
+	__le16 offset;
 	uint8_t zero2;
-	uint16_t end_marker;
+	__le16 end_marker;
 };
 
-static const struct usb_ctrlrequest t300rs_fw_request = {
-	.bRequestType = 0xc1,
-	.bRequest = 86,
-	.wValue = 0,
-	.wIndex = 0,
-	.wLength = sizeof(struct t300rs_fw_response)
-};
+/* vendor specific requests to the interface, device to host */
+#define T300RS_REQUEST_TYPE_IN	(USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_INTERFACE)
+#define T300RS_REQUEST_FW_VERSION	86
+#define T300RS_REQUEST_ATTACHMENT	73
 
 struct t300rs_data {
 	unsigned long quirks;
@@ -521,7 +518,7 @@ int t300rs_play_effect(void *data, const struct tmff2_effect_state *state)
 	struct __packed t300rs_packet_play {
 		struct t300rs_packet_header header;
 		uint8_t code;
-		uint16_t count;
+		__le16 count;
 	} *play_packet = (struct t300rs_packet_play *)t300rs->send_buffer;
 
 	int ret;
@@ -589,7 +586,7 @@ static void t300rs_fill_timing(struct t300rs_packet_timing *packet_timing,
 	packet_timing->duration = cpu_to_le16(duration);
 	packet_timing->offset = cpu_to_le16(offset);
 
-	packet_timing->end_marker = 0xffff;
+	packet_timing->end_marker = cpu_to_le16(0xffff);
 }
 
 static int t300rs_update_constant(struct t300rs_device_entry *t300rs,
@@ -601,12 +598,12 @@ static int t300rs_update_constant(struct t300rs_device_entry *t300rs,
 	struct ff_constant_effect constant_old = old.u.constant;
 	struct __packed t300rs_packet_mod_constant {
 		struct t300rs_packet_header header;
-		uint16_t magnitude;
+		__le16 magnitude;
 		struct t300rs_packet_envelope envelope;
 		uint8_t effect_type;
 		uint8_t update_type;
-		uint16_t duration;
-		uint16_t offset;
+		__le16 duration;
+		__le16 offset;
 	} *packet_mod_constant = (struct t300rs_packet_mod_constant *)t300rs->send_buffer;
 
 	int ret = 0;
@@ -652,14 +649,14 @@ static int t300rs_update_ramp(struct t300rs_device_entry *t300rs,
 	struct __packed t300rs_packet_mod_ramp {
 		struct t300rs_packet_header header;
 		uint8_t type;
-		uint16_t slope;
-		uint16_t center;
-		uint16_t length;
+		__le16 slope;
+		__le16 center;
+		__le16 length;
 		struct t300rs_packet_envelope envelope;
 		uint8_t effect_type;
 		uint8_t update_type;
-		uint16_t length2;
-		uint16_t offset;
+		__le16 length2;
+		__le16 offset;
 	} *packet_mod_ramp = (struct t300rs_packet_mod_ramp *)t300rs->send_buffer;
 
 	int ret = 0;
@@ -712,16 +709,16 @@ static int t300rs_update_condition(struct t300rs_device_entry *t300rs,
 	struct __packed t300rs_packet_mod_condition
 	{
 		struct t300rs_packet_header header;
-		uint16_t right_coeff;
-		uint16_t left_coeff;
-		uint16_t right_deadband;
-		uint16_t left_deadband;
-		uint16_t right_saturation;
-		uint16_t left_saturation;
+		__le16 right_coeff;
+		__le16 left_coeff;
+		__le16 right_deadband;
+		__le16 left_deadband;
+		__le16 right_saturation;
+		__le16 left_saturation;
 		uint8_t effect_type;
 		uint8_t update_type;
-		uint16_t duration;
-		uint16_t delay;
+		__le16 duration;
+		__le16 delay;
 	} *packet_mod_condition = (struct t300rs_packet_mod_condition *)t300rs->send_buffer;
 
 	int ret = 0;
@@ -788,15 +785,15 @@ static int t300rs_update_periodic(struct t300rs_device_entry *t300rs,
 	struct __packed t300rs_packet_mod_periodic {
 		struct t300rs_packet_header header;
 		uint8_t type;
-		uint16_t magnitude;
-		uint16_t offset;
-		uint16_t phase;
-		uint16_t period;
+		__le16 magnitude;
+		__le16 offset;
+		__le16 phase;
+		__le16 period;
 		struct t300rs_packet_envelope envelope;
 		uint8_t effect_type;
 		uint8_t update_type;
-		uint16_t duration;
-		uint16_t play_offset;
+		__le16 duration;
+		__le16 play_offset;
 	} *packet_mod_periodic = (struct t300rs_packet_mod_periodic *)t300rs->send_buffer;
 
 	struct ff_periodic_effect periodic, periodic_old;
@@ -849,7 +846,7 @@ static int t300rs_upload_constant(struct t300rs_device_entry *t300rs,
 	struct ff_constant_effect constant = state->effect.u.constant;
 	struct __packed t300rs_packet_constant {
 		struct t300rs_packet_header header;
-		uint16_t level;
+		__le16 level;
 		struct t300rs_packet_envelope envelope;
 		uint8_t zero;
 		struct t300rs_packet_timing timing;
@@ -886,11 +883,11 @@ static int t300rs_upload_ramp(struct t300rs_device_entry *t300rs,
 	struct ff_ramp_effect ramp = state->effect.u.ramp;
 	struct __packed t300rs_packet_ramp {
 		struct t300rs_packet_header header;
-		uint16_t slope;
-		uint16_t center;
+		__le16 slope;
+		__le16 center;
 		uint8_t zero1[2];
-		uint16_t duration;
-		uint16_t marker;
+		__le16 duration;
+		__le16 marker;
 		struct t300rs_packet_envelope envelope;
 		uint8_t invert;
 		struct t300rs_packet_timing timing;
@@ -934,15 +931,15 @@ static int t300rs_upload_condition(struct t300rs_device_entry *t300rs,
 	struct ff_condition_effect cond = state->effect.u.condition[0];
 	struct __packed t300rs_packet_condition {
 		struct t300rs_packet_header header;
-		int16_t right_coeff;
-		int16_t left_coeff;
-		int16_t right_deadband;
-		int16_t left_deadband;
-		uint16_t right_saturation;
-		uint16_t left_saturation;
+		__le16 right_coeff;
+		__le16 left_coeff;
+		__le16 right_deadband;
+		__le16 left_deadband;
+		__le16 right_saturation;
+		__le16 left_saturation;
 		uint8_t hardcoded[ARRAY_SIZE(condition_values)];
-		uint16_t max_right_saturation;
-		uint16_t max_left_saturation;
+		__le16 max_right_saturation;
+		__le16 max_left_saturation;
 		uint8_t type;
 		struct t300rs_packet_timing timing;
 	} *packet_condition = (struct t300rs_packet_condition *)t300rs->send_buffer;
@@ -997,11 +994,11 @@ static int t300rs_upload_periodic(struct t300rs_device_entry *t300rs,
 	struct ff_effect effect = state->effect;
 	struct __packed t300rs_packet_periodic {
 		struct t300rs_packet_header header;
-		uint16_t magnitude;
-		uint16_t periodic_offset;
-		uint16_t phase;
-		uint16_t period;
-		uint16_t marker;
+		__le16 magnitude;
+		__le16 periodic_offset;
+		__le16 phase;
+		__le16 period;
+		__le16 marker;
 		struct t300rs_packet_envelope envelope;
 		uint8_t waveform;
 		struct t300rs_packet_timing timing;
@@ -1198,7 +1195,7 @@ int t300rs_set_autocenter(void *data, uint16_t value)
 	struct t300rs_device_entry *t300rs = data;
 	struct __packed t300rs_packet_autocenter {
 		struct t300rs_setup_header header;
-		uint16_t value;
+		__le16 value;
 	} autocenter_packet = { 0 };
 	int ret;
 
@@ -1343,12 +1340,11 @@ static int t300rs_check_firmware(struct t300rs_device_entry *t300rs)
 	/* fetch firmware version */
 	ret = usb_control_msg(t300rs->usbdev,
 			usb_rcvctrlpipe(t300rs->usbdev, 0),
-			t300rs_fw_request.bRequest,
-			t300rs_fw_request.bRequestType,
-			t300rs_fw_request.wValue,
-			t300rs_fw_request.wIndex,
+			T300RS_REQUEST_FW_VERSION,
+			T300RS_REQUEST_TYPE_IN,
+			0, 0,
 			fw_response,
-			t300rs_fw_request.wLength,
+			sizeof(struct t300rs_fw_response),
 			USB_CTRL_SET_TIMEOUT
 			);
 
@@ -1386,45 +1382,37 @@ static int t300rs_get_attachment(struct t300rs_device_entry *t300rs)
 	/* taken directly from hid_tminit */
 	struct __packed t300rs_attachment_response
 	{
-		uint16_t type;
+		__le16 type;
 
 		union {
 			struct __packed {
-				uint16_t field0;
-				uint16_t field1;
+				__le16 field0;
+				__le16 field1;
 				uint8_t attachment;
 				uint8_t model;
-				uint16_t field2;
-				uint16_t field3;
-				uint16_t field4;
-				uint16_t field5;
+				__le16 field2;
+				__le16 field3;
+				__le16 field4;
+				__le16 field5;
 			} a;
 
 			struct __packed {
-				uint16_t field0;
-				uint16_t field1;
+				__le16 field0;
+				__le16 field1;
 				uint8_t attachment;
 				uint8_t model;
 			} b;
 		};
 	} *response = kzalloc(sizeof(struct t300rs_attachment_response), GFP_KERNEL);
-	struct usb_ctrlrequest t300rs_attachment_rq = {
-		.bRequestType = 0xc1,
-		.bRequest = 73,
-		.wValue = 0,
-		.wIndex = 0,
-		.wLength = sizeof(struct t300rs_attachment_response)
-	};
 	int ret, attachment;
 	if (!response)
 		return -ENOMEM;
 
 	ret = usb_control_msg(t300rs->usbdev,
 			usb_rcvctrlpipe(t300rs->usbdev, 0),
-			t300rs_attachment_rq.bRequest,
-			t300rs_attachment_rq.bRequestType,
-			t300rs_attachment_rq.wValue,
-			t300rs_attachment_rq.wIndex,
+			T300RS_REQUEST_ATTACHMENT,
+			T300RS_REQUEST_TYPE_IN,
+			0, 0,
 			response,
 			sizeof(struct t300rs_attachment_response),
 			USB_CTRL_SET_TIMEOUT
@@ -1449,7 +1437,7 @@ static int t300rs_get_attachment(struct t300rs_device_entry *t300rs)
 	} else {
 		hid_err(t300rs->hdev,
 				"unknown packet type %hx, please contact a maintainer\n",
-				le16_to_cpu((__force __le16)response->type));
+				le16_to_cpu(response->type));
 		ret = -EINVAL;
 		goto out;
 	}
