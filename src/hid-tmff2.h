@@ -143,6 +143,9 @@ struct t300rs_device_entry {
 	int attachment;
 	u8 buffer_length;
 	u8 *send_buffer;
+
+	/* serializes access to ff_field and the output report */
+	spinlock_t send_lock;
 };
 
 int t300rs_play_effect(void *, const struct tmff2_effect_state *);
@@ -156,7 +159,7 @@ int t300rs_set_gain(void *, uint16_t);
 int t300rs_set_range(void *, uint16_t);
 int t300rs_set_autocenter(void *, uint16_t);
 
-int t300rs_send_buf(struct t300rs_device_entry *t300rs, u8 *send_buffer, size_t len);
+int t300rs_send_buf(struct t300rs_device_entry *t300rs, const u8 *send_buffer, size_t len);
 int t300rs_send_int(struct t300rs_device_entry *t300rs);
 
 /* shared initialization of a t300rs_device_entry, validates the output report

@@ -468,12 +468,20 @@ static void t300rs_calculate_ramp_parameters(uint16_t *out_slope,
 	*out_invert = (start_level < end_level) ? 0x04 : 0x05;
 }
 
-int t300rs_send_buf(struct t300rs_device_entry *t300rs, u8 *send_buffer, size_t len)
+int t300rs_send_buf(struct t300rs_device_entry *t300rs, const u8 *send_buffer, size_t len)
 {
-	int i;
+	unsigned long flags;
+	size_t i;
+
 	/* check that send_buffer fits into our report */
 	if (len > t300rs->buffer_length)
 		return -EINVAL;
+
+	/* the field values are shared by everyone sending to the wheel, and
+	 * some callers (gain, autocenter) run in atomic context. usbhid copies
+	 * the report into its own output queue in hid_hw_request(), so holding
+	 * the lock until then is enough to keep packets from mixing. */
+	spin_lock_irqsave(&t300rs->send_lock, flags);
 
 	/* fill with actual data */
 	for (i = 0; i < len; ++i)
@@ -484,6 +492,8 @@ int t300rs_send_buf(struct t300rs_device_entry *t300rs, u8 *send_buffer, size_t 
 		t300rs->ff_field->value[i] = 0;
 
 	hid_hw_request(t300rs->hdev, t300rs->report, HID_REQ_SET_REPORT);
+
+	spin_unlock_irqrestore(&t300rs->send_lock, flags);
 	return 0;
 }
 
@@ -1476,6 +1486,7 @@ int t300rs_init_common(struct tmff2_device_entry *tmff2,
 	/* tmff2_probe() only accepts USB devices, so this cast is safe */
 	t300rs->usbdev = interface_to_usbdev(to_usb_interface(hdev->dev.parent));
 	t300rs->buffer_length = buffer_length;
+	spin_lock_init(&t300rs->send_lock);
 
 	/* the report descriptor is replaced by wheel_fixup, but make sure the
 	 * output report actually looks like we expect before writing into it */
