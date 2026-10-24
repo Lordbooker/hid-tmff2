@@ -88,6 +88,9 @@ static struct tmff2_device_entry *tmff2_from_input(struct input_dev *input_dev)
 
 	spin_unlock_irqrestore(&lock, lock_flags);
 
+	if (!hdev)
+		return NULL;
+
 	return tmff2_from_hdev(hdev);
 }
 
