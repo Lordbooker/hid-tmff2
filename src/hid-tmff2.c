@@ -744,7 +744,13 @@ static int tmff2_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		goto hid_err;
 	}
 
-	tmff2->input_dev = list_entry(hdev->inputs.next, struct hid_input, list)->input;
+	if (list_empty(&hdev->inputs)) {
+		hid_err(hdev, "no input device found\n");
+		ret = -ENODEV;
+		goto init_err;
+	}
+
+	tmff2->input_dev = list_first_entry(&hdev->inputs, struct hid_input, list)->input;
 
 	if ((ret = tmff2_wheel_init(tmff2))) {
 		hid_err(hdev, "init failed\n");
