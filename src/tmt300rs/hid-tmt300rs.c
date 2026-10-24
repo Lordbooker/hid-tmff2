@@ -489,10 +489,12 @@ int t300rs_send_buf(struct t300rs_device_entry *t300rs, u8 *send_buffer, size_t 
 
 int t300rs_send_int(struct t300rs_device_entry *t300rs)
 {
-	t300rs_send_buf(t300rs, t300rs->send_buffer, t300rs->buffer_length);
+	int ret;
+
+	ret = t300rs_send_buf(t300rs, t300rs->send_buffer, t300rs->buffer_length);
 	memset(t300rs->send_buffer, 0, t300rs->buffer_length);
 
-	return 0;
+	return ret;
 }
 
 static void t300rs_fill_header(struct t300rs_packet_header *packet_header,
