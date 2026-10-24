@@ -332,7 +332,7 @@ static u8 t300rs_rdesc_ps4_fixed[] = {
 	0xc0,
 };
 
-static u8 condition_values[] = {
+static const u8 condition_values[] = {
 	0xfe, 0xff, 0xfe, 0xff, 0xfe,
 	0xff, 0xfe, 0xff
 };
@@ -1124,9 +1124,9 @@ static int t300rs_switch_mode(void *data, uint16_t mode)
 	return 0;
 }
 
-static struct t300rs_alt_modes {
-	char *id;
-	char *label;
+static const struct t300rs_alt_modes {
+	const char *id;
+	const char *label;
 	uint16_t mode;
 } t300rs_modes[] = {
 	{"base", "T300RS base", 0},
