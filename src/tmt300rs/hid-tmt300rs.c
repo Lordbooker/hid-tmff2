@@ -1426,6 +1426,13 @@ static int t300rs_get_attachment(struct t300rs_device_entry *t300rs)
 		goto out;
 	}
 
+	/* the attachment byte is at the same offset in both response types */
+	if (ret <= offsetof(struct t300rs_attachment_response, b.attachment)) {
+		hid_err(t300rs->hdev, "short attachment response (%i bytes)\n", ret);
+		ret = -EIO;
+		goto out;
+	}
+
 	if (response->type == cpu_to_le16(0x49)) {
 		attachment = response->a.attachment;
 	} else if (response->type == cpu_to_le16(0x47)) {
