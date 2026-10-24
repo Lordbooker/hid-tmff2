@@ -1356,8 +1356,14 @@ static int t300rs_check_firmware(struct t300rs_device_entry *t300rs)
 		goto out;
 	}
 
+	if (ret <= offsetof(struct t300rs_fw_response, fw_version)) {
+		hid_warn(t300rs->hdev, "short firmware version response (%i bytes)\n", ret);
+		ret = 0;
+		goto out;
+	}
+
 	/* educated guess */
-	if (fw_response->fw_version < 31 && ret >= 0) {
+	if (fw_response->fw_version < 31) {
 		hid_warn(t300rs->hdev,
 				"firmware version %i might be too old, consider updating\n",
 				fw_response->fw_version
