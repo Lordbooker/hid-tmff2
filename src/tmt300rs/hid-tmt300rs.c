@@ -1090,30 +1090,37 @@ int t300rs_upload_effect(void *data, const struct tmff2_effect_state *state)
 static int t300rs_switch_mode(void *data, uint16_t mode)
 {
 	struct t300rs_device_entry *t300rs = data;
+	int value, ret;
+
 	if (!t300rs)
 		return -ENODEV;
 
-	if(t300rs->mode == mode) /* already in specified mode */
+	if (t300rs->mode == mode) /* already in specified mode */
 		return 0;
 
-	if (mode == 0)
-		/* go to normal mode */
-		usb_control_msg(t300rs->usbdev,
-				usb_sndctrlpipe(t300rs->usbdev, 0),
-				83, 0x41, 5, 0, 0, 0,
-				USB_CTRL_SET_TIMEOUT
-				);
-	else if (mode == 1)
-		/* go to advanced mode */
-		usb_control_msg(t300rs->usbdev,
-				usb_sndctrlpipe(t300rs->usbdev, 0),
-				83, 0x41, 3, 0, 0, 0,
-				USB_CTRL_SET_TIMEOUT
-				);
-	else
+	switch (mode) {
+	case 0: /* go to normal mode */
+		value = 5;
+		break;
+	case 1: /* go to advanced mode */
+		value = 3;
+		break;
+	default:
 		hid_warn(t300rs->hdev, "mode %i not supported\n", mode);
+		return -EINVAL;
+	}
 
+	ret = usb_control_msg(t300rs->usbdev,
+			usb_sndctrlpipe(t300rs->usbdev, 0),
+			83, 0x41, value, 0, NULL, 0,
+			USB_CTRL_SET_TIMEOUT);
+	if (ret < 0) {
+		hid_err(t300rs->hdev, "failed switching to mode %i: %i\n", mode, ret);
+		return ret;
+	}
 
+	/* the wheel reconnects with a different product id after switching */
+	t300rs->mode = mode;
 	return 0;
 }
 
