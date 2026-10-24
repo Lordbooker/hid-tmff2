@@ -764,6 +764,7 @@ init_err:
 hid_err:
 	tmff2->wheel_destroy(tmff2->data);
 wheel_err:
+	hid_set_drvdata(hdev, NULL);
 	kfree(tmff2);
 oom_err:
 	return ret;
@@ -821,6 +822,7 @@ static void tmff2_remove(struct hid_device *hdev)
 	hid_hw_stop(hdev);
 	tmff2->wheel_destroy(tmff2->data);
 
+	hid_set_drvdata(hdev, NULL);
 	kfree(tmff2->states);
 	kfree(tmff2);
 }
