@@ -395,7 +395,7 @@ static void tmff2_work_handler(struct work_struct *w)
 		hid_hw_wait(tmff2->hdev);
 	}
 
-	if (max_count && tmff2->allow_scheduling)
+	if (max_count && READ_ONCE(tmff2->allow_scheduling))
 		schedule_delayed_work(&tmff2->work, msecs_to_jiffies(timer_msecs));
 }
 
@@ -486,7 +486,7 @@ static int tmff2_play(struct input_dev *dev, int effect_id, int value)
 
 	spin_unlock_irqrestore(&tmff2->lock, lock_flags);
 
-	if (!delayed_work_pending(&tmff2->work) && tmff2->allow_scheduling)
+	if (!delayed_work_pending(&tmff2->work) && READ_ONCE(tmff2->allow_scheduling))
 		schedule_delayed_work(&tmff2->work, 0);
 
 	return 0;
@@ -664,7 +664,7 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 	if ((ret = tmff2_create_files(tmff2)))
 		goto file_err;
 
-	tmff2->allow_scheduling = 1;
+	WRITE_ONCE(tmff2->allow_scheduling, 1);
 	return 0;
 
 file_err:
@@ -788,7 +788,11 @@ static void tmff2_remove(struct hid_device *hdev)
 	if (!tmff2)
 		return;
 
-	tmff2->allow_scheduling = 0;
+	/* stop the work handler from rescheduling itself. tmff2_play() may
+	 * still have seen allow_scheduling set and queue the work once more,
+	 * which is why the work is cancelled again after hid_hw_stop(), when
+	 * the input device (and with it any ff playback) is gone. */
+	WRITE_ONCE(tmff2->allow_scheduling, 0);
 	cancel_delayed_work_sync(&tmff2->work);
 
 	dev = &tmff2->hdev->dev;
@@ -811,6 +815,8 @@ static void tmff2_remove(struct hid_device *hdev)
 		device_remove_file(dev, &dev_attr_gain);
 
 	hid_hw_stop(hdev);
+	cancel_delayed_work_sync(&tmff2->work);
+
 	tmff2->wheel_destroy(tmff2->data);
 
 	hid_set_drvdata(hdev, NULL);
