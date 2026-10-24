@@ -222,6 +222,7 @@ static int tm_common_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 	return 0;
 
 interrupt_err:
+	kfree(wheel->send_buffer);
 send_err:
 	kfree(wheel);
 wheel_err:
