@@ -600,9 +600,17 @@ static void tmff2_close(struct input_dev *dev)
 	if (!tmff2)
 		return;
 
-	/* since we're closing the device, no need to continue feeding it new data */
-	/* TODO: check somewhere that multiple users can't open us at the same
-	 * time */
+	/* The ff core stops the effects of the closing file right before the
+	 * device is closed, which only queues the stop commands. Cancelling
+	 * the work would drop them, and without the close command
+	 * (open_mode=0) effects would keep playing on the wheel. Send whatever
+	 * is still queued, then make sure the work doesn't run again.
+	 *
+	 * The input core only calls close() when the last user goes away, so
+	 * there is no need to check for other users here. */
+	cancel_delayed_work_sync(&tmff2->work);
+	if (tmff2->states) /* NULL if probe failed after open/close were set */
+		tmff2_work_handler(&tmff2->work.work);
 	cancel_delayed_work_sync(&tmff2->work);
 
 	if (tmff2->close) {
