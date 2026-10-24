@@ -14,7 +14,7 @@ static inline bool hid_is_usb(struct hid_device *hdev)
 }
 #endif
 
-int open_mode = 1;
+static int open_mode = 1;
 module_param(open_mode, int, 0660);
 MODULE_PARM_DESC(open_mode,
 		"Whether to send mode change commands on open/close");
@@ -586,7 +586,7 @@ static int tmff2_open(struct input_dev *dev)
 		return -ENODEV;
 
 	if (tmff2->open)
-		return tmff2->open(tmff2->data, open_mode);
+		return tmff2->open(tmff2->data, READ_ONCE(open_mode));
 
 	hid_err(tmff2->hdev, "no open callback set\n");
 	return -EINVAL;
@@ -605,7 +605,7 @@ static void tmff2_close(struct input_dev *dev)
 	cancel_delayed_work_sync(&tmff2->work);
 
 	if (tmff2->close) {
-		tmff2->close(tmff2->data, open_mode);
+		tmff2->close(tmff2->data, READ_ONCE(open_mode));
 		return;
 	}
 
