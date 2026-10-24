@@ -70,10 +70,11 @@ module_param(range, int, 0);
 MODULE_PARM_DESC(range,
 		"Range of wheel, depends on the wheel. Invalid values are ignored");
 
-int alt_mode = 0;
+#define ALT_MODE_KEEP -1
+static int alt_mode = ALT_MODE_KEEP;
 module_param(alt_mode, int, 0);
 MODULE_PARM_DESC(alt_mode,
-		"Alternate mode, eg. F1 mode");
+		"Alternate mode to switch to on connect, eg. 1 for F1 mode on the T300RS (-1 = keep the current mode)");
 
 #define GAIN_MAX 65535
 static u16 gain = 40000;
@@ -678,7 +679,10 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 	if (tmff2->set_range)
 		tmff2->set_range(tmff2->data, tmff2->range);
 
-	if (tmff2->switch_mode)
+	/* only switch if a mode was requested, the wheel reconnects in the
+	 * new mode, and switching back to a default here would undo mode
+	 * changes made through sysfs */
+	if (tmff2->switch_mode && alt_mode != ALT_MODE_KEEP)
 		tmff2->switch_mode(tmff2->data, alt_mode);
 
 	/* create sysfs files, which ones are visible depends on params */

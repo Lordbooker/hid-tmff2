@@ -1103,6 +1103,11 @@ static int t300rs_switch_mode(void *data, uint16_t mode)
 		value = 5;
 		break;
 	case 1: /* go to advanced mode */
+		/* the advanced mode needs the F1 wheel attachment */
+		if (t300rs->attachment != T300RS_F1_ATTACHMENT) {
+			hid_warn(t300rs->hdev, "mode %i needs the F1 attachment\n", mode);
+			return -EINVAL;
+		}
 		value = 3;
 		break;
 	default:
@@ -1524,7 +1529,7 @@ static int t300rs_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 		goto init_err;
 
 	/* TODO: PS4 advanced mode? */
-	alt_mode = (t300rs->mode = (t300rs->hdev->product == TMT300RS_PS3_ADV_ID));
+	t300rs->mode = (t300rs->hdev->product == TMT300RS_PS3_ADV_ID);
 	if ((t300rs->attachment = t300rs_get_attachment(t300rs)) < 0)
 		t300rs->attachment = T300RS_DEFAULT_ATTACHMENT;
 

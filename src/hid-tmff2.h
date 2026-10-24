@@ -7,8 +7,6 @@
 #include <linux/ktime.h>
 #include <linux/input.h>
 
-extern int alt_mode;
-
 #define USB_VENDOR_ID_THRUSTMASTER 0x044f
 
 /* the wheel seems to only be capable of processing a certain number of
