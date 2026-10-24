@@ -37,10 +37,12 @@ static const signed short t300rs_effects[] = {
 	-1
 };
 
+/* the wheel answers the firmware request with up to wLength (8) bytes, so the
+ * response buffer has to be at least that large */
 struct __packed t300rs_fw_response {
 	uint8_t unused1[2];
 	uint8_t fw_version;
-	uint8_t unused2;
+	uint8_t unused2[5];
 };
 
 
@@ -71,12 +73,12 @@ struct __packed t300rs_packet_timing {
 	uint16_t end_marker;
 };
 
-struct usb_ctrlrequest t300rs_fw_request = {
+static const struct usb_ctrlrequest t300rs_fw_request = {
 	.bRequestType = 0xc1,
 	.bRequest = 86,
 	.wValue = 0,
 	.wIndex = 0,
-	.wLength = 8
+	.wLength = sizeof(struct t300rs_fw_response)
 };
 
 struct t300rs_data {
