@@ -1461,10 +1461,51 @@ out:
 	return ret;
 }
 
+int t300rs_init_common(struct tmff2_device_entry *tmff2,
+		struct t300rs_device_entry *t300rs, u8 buffer_length)
+{
+	struct hid_device *hdev = tmff2->hdev;
+	struct list_head *report_list =
+		&hdev->report_enum[HID_OUTPUT_REPORT].report_list;
+	struct hid_report *report;
+
+	t300rs->hdev = hdev;
+	t300rs->input_dev = tmff2->input_dev;
+	/* tmff2_probe() only accepts USB devices, so this cast is safe */
+	t300rs->usbdev = interface_to_usbdev(to_usb_interface(hdev->dev.parent));
+	t300rs->buffer_length = buffer_length;
+
+	/* the report descriptor is replaced by wheel_fixup, but make sure the
+	 * output report actually looks like we expect before writing into it */
+	if (list_empty(report_list)) {
+		hid_err(hdev, "no output report found\n");
+		return -ENODEV;
+	}
+
+	report = list_first_entry(report_list, struct hid_report, list);
+	if (report->maxfield < 1 || !report->field[0]
+			|| report->field[0]->report_count < buffer_length) {
+		hid_err(hdev, "unexpected output report layout\n");
+		return -ENODEV;
+	}
+
+	t300rs->report = report;
+	t300rs->ff_field = report->field[0];
+
+	t300rs->send_buffer = kzalloc(buffer_length, GFP_KERNEL);
+	if (!t300rs->send_buffer)
+		return -ENOMEM;
+
+	t300rs->open = t300rs->input_dev->open;
+	t300rs->close = t300rs->input_dev->close;
+
+	return 0;
+}
+
 static int t300rs_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 {
 	struct t300rs_device_entry *t300rs = kzalloc(sizeof(struct t300rs_device_entry), GFP_KERNEL);
-	struct list_head *report_list;
+	u8 buffer_length;
 	int ret;
 
 	if (!t300rs) {
@@ -1472,32 +1513,16 @@ static int t300rs_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 		goto t300rs_err;
 	}
 
-	t300rs->hdev = tmff2->hdev;
-	t300rs->input_dev = tmff2->input_dev;
-	t300rs->usbdev = to_usb_device(tmff2->hdev->dev.parent->parent);
-
-	if(t300rs->hdev->product == TMT300RS_PS4_NORM_ID)
-		t300rs->buffer_length = T300RS_PS4_BUFFER_LENGTH;
+	if (tmff2->hdev->product == TMT300RS_PS4_NORM_ID)
+		buffer_length = T300RS_PS4_BUFFER_LENGTH;
 	else
-		t300rs->buffer_length = T300RS_NORM_BUFFER_LENGTH;
+		buffer_length = T300RS_NORM_BUFFER_LENGTH;
 
-	t300rs->send_buffer = kzalloc(t300rs->buffer_length, GFP_KERNEL);
-	if (!t300rs->send_buffer) {
-		ret = -ENOMEM;
-		goto send_err;
-	}
+	if ((ret = t300rs_init_common(tmff2, t300rs, buffer_length)))
+		goto init_err;
 
 	if ((ret = t300rs_check_firmware(t300rs)))
-		goto firmware_err;
-
-	report_list = &t300rs->hdev->report_enum[HID_OUTPUT_REPORT].report_list;
-
-	/* because we set the rdesc, we know exactly which report and field to use */
-	t300rs->report = list_entry(report_list->next, struct hid_report, list);
-	t300rs->ff_field = t300rs->report->field[0];
-
-	t300rs->open = t300rs->input_dev->open;
-	t300rs->close = t300rs->input_dev->close;
+		goto init_err;
 
 	/* TODO: PS4 advanced mode? */
 	alt_mode = (t300rs->mode = (t300rs->hdev->product == TMT300RS_PS3_ADV_ID));
@@ -1516,9 +1541,8 @@ static int t300rs_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 	hid_info(t300rs->hdev, "force feedback for T300RS\n");
 	return 0;
 
-firmware_err:
+init_err:
 	kfree(t300rs->send_buffer);
-send_err:
 	kfree(t300rs);
 t300rs_err:
 	hid_err(tmff2->hdev, "failed initializing T300RS\n");

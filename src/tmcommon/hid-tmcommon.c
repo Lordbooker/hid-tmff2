@@ -178,36 +178,20 @@ static int tm_common_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 	const struct tm_wheel_desc *desc = tmff2->wheel_desc;
 	struct t300rs_device_entry *wheel = kzalloc(sizeof(struct t300rs_device_entry),
 						   GFP_KERNEL);
-	struct list_head *report_list;
 	int ret;
-
 
 	if (!wheel) {
 		ret = -ENOMEM;
 		goto wheel_err;
 	}
 
-	wheel->hdev = tmff2->hdev;
-	wheel->input_dev = tmff2->input_dev;
-	wheel->usbdev = to_usb_device(tmff2->hdev->dev.parent->parent);
-	wheel->buffer_length = TM_COMMON_BUFFER_LENGTH;
 	wheel->desc = desc;
 
-	wheel->send_buffer = kzalloc(wheel->buffer_length, GFP_KERNEL);
-	if (!wheel->send_buffer) {
-		ret = -ENOMEM;
-		goto send_err;
-	}
-
-	report_list = &wheel->hdev->report_enum[HID_OUTPUT_REPORT].report_list;
-	wheel->report = list_entry(report_list->next, struct hid_report, list);
-	wheel->ff_field = wheel->report->field[0];
-
-	wheel->open = wheel->input_dev->open;
-	wheel->close = wheel->input_dev->close;
+	if ((ret = t300rs_init_common(tmff2, wheel, TM_COMMON_BUFFER_LENGTH)))
+		goto init_err;
 
 	if ((ret = tm_common_interrupts(wheel)))
-		goto interrupt_err;
+		goto init_err;
 
 	/* everything went OK */
 	tmff2->data = wheel;
@@ -221,9 +205,8 @@ static int tm_common_wheel_init(struct tmff2_device_entry *tmff2, int open_mode)
 	hid_info(wheel->hdev, "force feedback for %s\n", desc->name);
 	return 0;
 
-interrupt_err:
+init_err:
 	kfree(wheel->send_buffer);
-send_err:
 	kfree(wheel);
 wheel_err:
 	hid_err(tmff2->hdev, "failed initializing %s\n", desc->name);
