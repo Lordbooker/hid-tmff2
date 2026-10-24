@@ -42,14 +42,13 @@ extern int alt_mode;
 		-(fixp_sin32((v % 360) - 180) >> 16)\
 		: fixp_sin32(v) >> 16)
 
-#define JIFFIES2MS(jiffies) ((jiffies) * 1000 / HZ)
-
 struct tmff2_effect_state {
 	struct ff_effect effect;
 	struct ff_effect old;
 
 	unsigned long flags;
 	unsigned long count;
+	/* in jiffies */
 	unsigned long start_time;
 };
 

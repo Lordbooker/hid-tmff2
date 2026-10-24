@@ -316,7 +316,7 @@ static void tmff2_work_handler(struct work_struct *w)
 	struct tmff2_device_entry *tmff2 = container_of(dw, struct tmff2_device_entry, work);
 	struct tmff2_effect_state *state;
 	int max_count = 0, effect_id;
-	unsigned long time_now;
+	unsigned int elapsed;
 	__u16 effect_delay, effect_length;
 
 
@@ -327,8 +327,6 @@ static void tmff2_work_handler(struct work_struct *w)
 		unsigned long actions = 0;
 		struct tmff2_effect_state effect;
 
-		time_now = JIFFIES2MS(jiffies);
-
 		state = &tmff2->states[effect_id];
 
 		/* critical section for updating state flags, keep log of what
@@ -338,8 +336,12 @@ static void tmff2_work_handler(struct work_struct *w)
 		effect_delay = state->effect.replay.delay;
 		effect_length = state->effect.replay.length;
 		if (test_bit(FF_EFFECT_PLAYING, &state->flags) && effect_length) {
-			if ((time_now - state->start_time) >=
-					(effect_delay + effect_length) * state->count) {
+			/* jiffies_to_msecs() of the difference is safe against
+			 * jiffies wrapping around, 64 bit math avoids overflows
+			 * with large repeat counts */
+			elapsed = jiffies_to_msecs(jiffies - state->start_time);
+			if ((u64)elapsed >=
+					(u64)(effect_delay + effect_length) * state->count) {
 				__clear_bit(FF_EFFECT_PLAYING, &state->flags);
 				__clear_bit(FF_EFFECT_QUEUE_UPDATE, &state->flags);
 
@@ -493,7 +495,7 @@ static int tmff2_play(struct input_dev *dev, int effect_id, int value)
 	spin_lock_irqsave(&tmff2->lock, lock_flags);
 	if (value > 0) {
 		state->count = value;
-		state->start_time = JIFFIES2MS(jiffies);
+		state->start_time = jiffies;
 		__set_bit(FF_EFFECT_QUEUE_START, &state->flags);
 		__clear_bit(FF_EFFECT_QUEUE_STOP, &state->flags);
 	} else {
