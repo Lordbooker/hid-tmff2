@@ -588,6 +588,10 @@ static int tmff2_play(struct input_dev *dev, int effect_id, int value)
 	return 0;
 }
 
+/* Installed as the input device's open() in tmff2_input_configured(), before
+ * the input device is registered, so no open can slip past it. The input core
+ * calls open() and close() with the input device's mutex held, which also
+ * protects tmff2->ready. */
 static int tmff2_open(struct input_dev *dev)
 {
 	struct tmff2_device_entry *tmff2 = tmff2_from_input(dev);
@@ -595,11 +599,12 @@ static int tmff2_open(struct input_dev *dev)
 	if (!tmff2)
 		return -ENODEV;
 
-	if (tmff2->open)
-		return tmff2->open(tmff2->data, READ_ONCE(open_mode));
+	/* until the wheel is initialized, tmff2_wheel_init() takes care of
+	 * sending the open command */
+	if (tmff2->ready && tmff2->open)
+		tmff2->open(tmff2->data, READ_ONCE(open_mode));
 
-	hid_err(tmff2->hdev, "no open callback set\n");
-	return -EINVAL;
+	return tmff2->hid_open ? tmff2->hid_open(dev) : 0;
 }
 
 static void tmff2_close(struct input_dev *dev)
@@ -617,17 +622,17 @@ static void tmff2_close(struct input_dev *dev)
 	 *
 	 * The input core only calls close() when the last user goes away, so
 	 * there is no need to check for other users here. */
-	cancel_delayed_work_sync(&tmff2->work);
-	if (tmff2->states) /* NULL if probe failed after open/close were set */
+	if (tmff2->ready) {
+		cancel_delayed_work_sync(&tmff2->work);
 		tmff2_work_handler(&tmff2->work.work);
-	cancel_delayed_work_sync(&tmff2->work);
+		cancel_delayed_work_sync(&tmff2->work);
 
-	if (tmff2->close) {
-		tmff2->close(tmff2->data, READ_ONCE(open_mode));
-		return;
+		if (tmff2->close)
+			tmff2->close(tmff2->data, READ_ONCE(open_mode));
 	}
 
-	hid_err(tmff2->hdev, "no close callback set\n");
+	if (tmff2->hid_close)
+		tmff2->hid_close(dev);
 }
 
 static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
@@ -678,12 +683,6 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 	ff->upload = tmff2_upload;
 	ff->playback = tmff2_play;
 
-	if (tmff2->open)
-		tmff2->input_dev->open = tmff2_open;
-
-	if (tmff2->close)
-		tmff2->input_dev->close = tmff2_close;
-
 	/* set defaults wherever possible */
 	if (tmff2->set_gain) {
 		ff->set_gain = tmff2_set_gain;
@@ -710,6 +709,15 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 	}
 
 	WRITE_ONCE(tmff2->allow_scheduling, 1);
+
+	/* someone may have opened the input device while the wheel was being
+	 * initialized, in that case the open command is still missing */
+	mutex_lock(&tmff2->input_dev->mutex);
+	if (tmff2->input_dev->users && tmff2->open)
+		tmff2->open(tmff2->data, READ_ONCE(open_mode));
+	tmff2->ready = 1;
+	mutex_unlock(&tmff2->input_dev->mutex);
+
 	return 0;
 
 file_err:
@@ -793,13 +801,12 @@ static int tmff2_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		goto hid_err;
 	}
 
-	if (list_empty(&hdev->inputs)) {
+	/* set by tmff2_input_configured() */
+	if (!tmff2->input_dev) {
 		hid_err(hdev, "no input device found\n");
 		ret = -ENODEV;
 		goto init_err;
 	}
-
-	tmff2->input_dev = list_first_entry(&hdev->inputs, struct hid_input, list)->input;
 
 	if ((ret = tmff2_wheel_init(tmff2))) {
 		hid_err(hdev, "init failed\n");
@@ -867,8 +874,21 @@ static void tmff2_remove(struct hid_device *hdev)
 static int tmff2_input_configured(struct hid_device *hdev,
 				  struct hid_input *hidinput)
 {
+	struct tmff2_device_entry *tmff2 = hid_get_drvdata(hdev);
 	struct input_dev *input = hidinput->input;
 	int axis;
+
+	/* hook into open/close of the first input device here, before it is
+	 * registered. Doing it after hid_hw_start() would race with userspace
+	 * opening the device in between, which then never gets the open
+	 * command. */
+	if (tmff2 && !tmff2->input_dev) {
+		tmff2->input_dev = input;
+		tmff2->hid_open = input->open;
+		tmff2->hid_close = input->close;
+		input->open = tmff2_open;
+		input->close = tmff2_close;
+	}
 
 	if (!input->absinfo)
 		return 0;

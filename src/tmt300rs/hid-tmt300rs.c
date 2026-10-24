@@ -1312,7 +1312,7 @@ int t300rs_open(void *data, int open_mode)
 	if (open_mode && t300rs_send_open(t300rs))
 		hid_warn(t300rs->hdev, "failed sending open command\n");
 
-	return t300rs->open(t300rs->input_dev);
+	return 0;
 }
 
 int t300rs_close(void *data, int open_mode)
@@ -1326,7 +1326,6 @@ int t300rs_close(void *data, int open_mode)
 	if (open_mode && (ret = t300rs_send_close(t300rs)))
 		hid_warn(t300rs->hdev, "failed sending close command\n");
 
-	t300rs->close(t300rs->input_dev);
 	return ret;
 }
 
@@ -1499,9 +1498,6 @@ int t300rs_init_common(struct tmff2_device_entry *tmff2,
 	t300rs->send_buffer = kzalloc(buffer_length, GFP_KERNEL);
 	if (!t300rs->send_buffer)
 		return -ENOMEM;
-
-	t300rs->open = t300rs->input_dev->open;
-	t300rs->close = t300rs->input_dev->close;
 
 	return 0;
 }

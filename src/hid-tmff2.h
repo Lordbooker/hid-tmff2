@@ -54,6 +54,12 @@ struct tmff2_device_entry {
 	spinlock_t lock;
 
 	int allow_scheduling;
+	/* the wheel is initialized, protected by input_dev->mutex */
+	int ready;
+
+	/* open/close of the input device as set up by hid-input */
+	int (*hid_open)(struct input_dev *dev);
+	void (*hid_close)(struct input_dev *dev);
 
 	/* per-device settings, changeable through sysfs */
 	int spring_level;
@@ -128,9 +134,6 @@ struct t300rs_device_entry {
 	struct hid_field *ff_field;
 	struct usb_device *usbdev;
 	struct tmff2_device_entry *tmff2;
-
-	int (*open)(struct input_dev *dev);
-	void (*close)(struct input_dev *dev);
 
 	/* only set for wheels using the shared tmcommon backend */
 	const struct tm_wheel_desc *desc;

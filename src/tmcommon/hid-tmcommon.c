@@ -144,7 +144,7 @@ static int tm_common_open(void *data, int open_mode)
 	if (open_mode && tm_common_send_open(wheel))
 		hid_warn(wheel->hdev, "failed sending open command\n");
 
-	return wheel->open(wheel->input_dev);
+	return 0;
 }
 
 static int tm_common_send_close(struct t300rs_device_entry *wheel)
@@ -169,7 +169,6 @@ static int tm_common_close(void *data, int open_mode)
 	if (open_mode && tm_common_send_close(wheel))
 		hid_warn(wheel->hdev, "failed sending close command\n");
 
-	wheel->close(wheel->input_dev);
 	return 0;
 }
 
