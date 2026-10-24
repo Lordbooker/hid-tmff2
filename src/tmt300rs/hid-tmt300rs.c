@@ -1398,7 +1398,7 @@ static int t300rs_get_attachment(struct t300rs_device_entry *t300rs)
 				uint8_t model;
 			} b;
 		};
-	} *response = kzalloc(GFP_KERNEL, sizeof(struct t300rs_attachment_response));
+	} *response = kzalloc(sizeof(struct t300rs_attachment_response), GFP_KERNEL);
 	struct usb_ctrlrequest t300rs_attachment_rq = {
 		.bRequestType = 0xc1,
 		.bRequest = 73,
@@ -1408,7 +1408,7 @@ static int t300rs_get_attachment(struct t300rs_device_entry *t300rs)
 	};
 	int ret, attachment;
 	if (!response)
-		return -ENODEV;
+		return -ENOMEM;
 
 	ret = usb_control_msg(t300rs->usbdev,
 			usb_rcvctrlpipe(t300rs->usbdev, 0),
