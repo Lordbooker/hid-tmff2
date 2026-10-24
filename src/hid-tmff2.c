@@ -3,8 +3,16 @@
 #include <linux/module.h>
 #include <linux/hid.h>
 #include <linux/version.h>
+#include <linux/usb.h>
 #include "hid-tmff2.h"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,16,0)
+/* hid_is_usb() was added in 5.16, older kernels only have the generic check */
+static inline bool hid_is_usb(struct hid_device *hdev)
+{
+	return hid_is_using_ll_driver(hdev, &usb_hid_driver);
+}
+#endif
 
 int open_mode = 1;
 module_param(open_mode, int, 0660);
@@ -678,12 +686,16 @@ err:
 
 static int tmff2_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
-	struct tmff2_device_entry *tmff2 =
-		kzalloc(sizeof(struct tmff2_device_entry), GFP_KERNEL);
-
+	struct tmff2_device_entry *tmff2;
 	int ret;
 
+	/* the wheel backends talk to the usb device directly, which is only
+	 * valid if the device really is connected via usbhid (and not e.g.
+	 * emulated through uhid with a matching vendor/product id) */
+	if (!hid_is_usb(hdev))
+		return -ENODEV;
 
+	tmff2 = kzalloc(sizeof(struct tmff2_device_entry), GFP_KERNEL);
 	if (!tmff2) {
 		ret = -ENOMEM;
 		goto oom_err;
