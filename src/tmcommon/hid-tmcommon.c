@@ -11,22 +11,18 @@
 #define TM_COMMON_MAX_EFFECTS 16
 #define TM_COMMON_BUFFER_LENGTH 63
 
-static const u8 setup_0[64] = { 0x42, 0x01 };
-static const u8 setup_1[64] = { 0x0a, 0x04, 0x90, 0x03 };
-static const u8 setup_2[64] = { 0x0a, 0x04, 0x00, 0x0c };
-static const u8 setup_3[64] = { 0x0a, 0x04, 0x12, 0x10 };
-static const u8 setup_4[64] = { 0x0a, 0x04, 0x00, 0x06 };
-static const u8 setup_5[64] = { 0x0a, 0x04, 0x00, 0x0e };
-static const u8 setup_6[64] = { 0x0a, 0x04, 0x00, 0x0e, 0x01 };
-static const u8 *const setup_arr[] = { setup_0, setup_1, setup_2, setup_3, setup_4, setup_5, setup_6 };
-static const unsigned int setup_arr_sizes[] = {
-	ARRAY_SIZE(setup_0),
-	ARRAY_SIZE(setup_1),
-	ARRAY_SIZE(setup_2),
-	ARRAY_SIZE(setup_3),
-	ARRAY_SIZE(setup_4),
-	ARRAY_SIZE(setup_5),
-	ARRAY_SIZE(setup_6)
+/* every setup packet is sent as a full 64 byte packet, the remaining bytes
+ * are zero */
+#define TM_COMMON_SETUP_PACKET_LENGTH 64
+
+static const u8 setup_arr[][TM_COMMON_SETUP_PACKET_LENGTH] = {
+	{ 0x42, 0x01 },
+	{ 0x0a, 0x04, 0x90, 0x03 },
+	{ 0x0a, 0x04, 0x00, 0x0c },
+	{ 0x0a, 0x04, 0x12, 0x10 },
+	{ 0x0a, 0x04, 0x00, 0x06 },
+	{ 0x0a, 0x04, 0x00, 0x0e },
+	{ 0x0a, 0x04, 0x00, 0x0e, 0x01 },
 };
 
 static const signed short tm_common_effects[] = {
@@ -70,28 +66,26 @@ static int tm_common_interrupts(struct t300rs_device_entry *wheel)
 	}
 	b_ep = ep->bEndpointAddress;
 
-	send_buf = kmalloc(256, GFP_KERNEL);
-	if (!send_buf) {
-		hid_err(wheel->hdev, "failed allocating send buffer\n");
+	/* usb transfers need a heap buffer */
+	send_buf = kmalloc(TM_COMMON_SETUP_PACKET_LENGTH, GFP_KERNEL);
+	if (!send_buf)
 		return -ENOMEM;
-	}
 
 	for (i = 0; i < ARRAY_SIZE(setup_arr); ++i) {
-		memcpy(send_buf, setup_arr[i], setup_arr_sizes[i]);
+		memcpy(send_buf, setup_arr[i], TM_COMMON_SETUP_PACKET_LENGTH);
 
 		ret = usb_interrupt_msg(wheel->usbdev,
 				usb_sndintpipe(wheel->usbdev, b_ep),
-				send_buf, setup_arr_sizes[i],
+				send_buf, TM_COMMON_SETUP_PACKET_LENGTH,
 				&trans,
 				USB_CTRL_SET_TIMEOUT);
 
 		if (ret) {
 			hid_err(wheel->hdev, "setup data couldn't be sent: %i\n", ret);
-			goto err;
+			break;
 		}
 	}
 
-err:
 	kfree(send_buf);
 	return ret;
 }
