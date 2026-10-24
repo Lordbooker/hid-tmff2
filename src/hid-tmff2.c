@@ -90,13 +90,11 @@ static ssize_t spring_level_store(struct device *dev,
 	int ret;
 
 	ret = kstrtouint(buf, 0, &value);
-	if (ret) {
-		dev_err(dev, "kstrtouint failed at spring_level_store: %i", ret);
+	if (ret)
 		return ret;
-	}
 
 	if (value > 100) {
-		dev_info(dev, "value %i larger than max 100, clamping to 100.\n", value);
+		dev_info_ratelimited(dev, "value %u larger than max 100, clamping to 100\n", value);
 		value = 100;
 	}
 
@@ -120,13 +118,11 @@ static ssize_t damper_level_store(struct device *dev,
 
 
 	ret = kstrtouint(buf, 0, &value);
-	if (ret) {
-		dev_err(dev, "kstrtouint failed at damper_level_store: %i", ret);
+	if (ret)
 		return ret;
-	}
 
 	if (value > 100) {
-		dev_info(dev, "value %i larger than max 100, clamping to 100.\n", value);
+		dev_info_ratelimited(dev, "value %u larger than max 100, clamping to 100\n", value);
 		value = 100;
 	}
 
@@ -150,13 +146,11 @@ static ssize_t friction_level_store(struct device *dev,
 
 
 	ret = kstrtouint(buf, 0, &value);
-	if (ret) {
-		dev_err(dev, "kstrtouint failed at friction_level_store: %i", ret);
+	if (ret)
 		return ret;
-	}
 
 	if (value > 100) {
-		dev_info(dev, "value %i larger than max 100, clamping to 100.\n", value);
+		dev_info_ratelimited(dev, "value %u larger than max 100, clamping to 100\n", value);
 		value = 100;
 	}
 
@@ -182,10 +176,8 @@ static ssize_t range_store(struct device *dev,
 	if (!tmff2)
 		return -ENODEV;
 
-	if ((ret = kstrtouint(buf, 0, &value))) {
-		hid_err(tmff2->hdev, "kstrtouint failed at range_store: %i", ret);
+	if ((ret = kstrtouint(buf, 0, &value)))
 		return ret;
-	}
 
 	if (tmff2->set_range) {
 		if ((ret = tmff2->set_range(tmff2->data, value)))
@@ -242,10 +234,8 @@ static ssize_t gain_store(struct device *dev,
 		return -ENODEV;
 
 	ret = kstrtou16(buf, 0, &value);
-	if (ret) {
-		dev_err(dev, "failed to parse gain: %d\n", ret);
+	if (ret)
 		return ret;
-	}
 
 	gain = value;
 	if (tmff2->set_gain) /* if we can, update gain immediately */
