@@ -61,35 +61,24 @@ static u16 tmff2_scale_gain(u16 value)
 	return DIV_ROUND_CLOSEST((u32)value * gain, GAIN_MAX);
 }
 
-static spinlock_t lock;
-
 static struct tmff2_device_entry *tmff2_from_hdev(struct hid_device *hdev)
 {
-	unsigned long lock_flags = 0;
-	struct tmff2_device_entry *tmff2;
-	spin_lock_irqsave(&lock, lock_flags);
+	struct tmff2_device_entry *tmff2 = hid_get_drvdata(hdev);
 
-	if (!(tmff2 = hid_get_drvdata(hdev)))
+	if (!tmff2)
 		dev_err(&hdev->dev, "hdev private data not found\n");
-
-	spin_unlock_irqrestore(&lock, lock_flags);
 
 	return tmff2;
 }
 
 static struct tmff2_device_entry *tmff2_from_input(struct input_dev *input_dev)
 {
-	unsigned long lock_flags = 0;
-	struct hid_device *hdev;
-	spin_lock_irqsave(&lock, lock_flags);
+	struct hid_device *hdev = input_get_drvdata(input_dev);
 
-	if (!(hdev = input_get_drvdata(input_dev)))
+	if (!hdev) {
 		dev_err(&input_dev->dev, "input_dev private data not found\n");
-
-	spin_unlock_irqrestore(&lock, lock_flags);
-
-	if (!hdev)
 		return NULL;
+	}
 
 	return tmff2_from_hdev(hdev);
 }
@@ -607,7 +596,6 @@ static int tmff2_wheel_init(struct tmff2_device_entry *tmff2)
 	int ret, i;
 	struct ff_device *ff;
 
-	spin_lock_init(&lock);
 	spin_lock_init(&tmff2->lock);
 	INIT_DELAYED_WORK(&tmff2->work, tmff2_work_handler);
 
